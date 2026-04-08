@@ -20,6 +20,7 @@ interface CreateVersionInput {
 
 interface BlogFilters {
   status?: BlogVersion["status"];
+  site?: BlogVersion["site"];
 }
 
 interface BlogPagination {
@@ -37,8 +38,6 @@ interface PublicBlogListItem {
   summary: string;
   html_content: string;
   status: BlogListStatus;
-  selected_news: StoredSelectedNews | null;
-  source_results: SearchResult[];
   created_at: Date;
   updated_at: Date;
 }
@@ -307,15 +306,19 @@ export async function getBlogs(
   filters: BlogFilters = {},
   pagination: BlogPagination = { skip: 0, limit: 25 }
 ): Promise<BlogListResult> {
-  const query: Partial<Pick<BlogVersion, "status">> = {};
+  const query: Partial<Pick<BlogVersion, "status" | "site">> = {};
 
   if (filters.status) {
     query.status = filters.status;
   }
 
+  if (filters.site) {
+    query.site = filters.site;
+  }
+
   const total = await BlogVersionModel.countDocuments(query);
   const items = await BlogVersionModel.find(query)
-    .sort({ created_at: -1, revision: -1 })
+    .sort({ updated_at: -1, created_at: -1, revision: -1 })
     .skip(pagination.skip)
     .limit(pagination.limit);
 
@@ -337,8 +340,6 @@ export async function getBlogs(
     summary: item.summary,
     html_content: item.html_content,
     status: normalizeBlogListStatus(item.status),
-    selected_news: item.selected_news,
-    source_results: item.source_results,
     created_at: item.created_at,
     updated_at: item.updated_at
   }));

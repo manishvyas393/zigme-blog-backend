@@ -38,6 +38,7 @@ type BlogStatus = "draft" | "pending" | "approved" | "rejected";
 
 interface BlogListQuery {
   "filter[status]"?: string;
+  "filter[platform]"?: string;
   page?: string;
   pageNo?: string;
   limit?: string;
@@ -45,10 +46,6 @@ interface BlogListQuery {
 }
 
 const validStatuses: BlogStatus[] = ["draft", "pending", "approved", "rejected"];
-
-function parseBooleanFilter(value: string | undefined): boolean | undefined {
-  return value === undefined ? undefined : undefined;
-}
 
 function parseNonNegativeInteger(value: string | undefined, field: string): number | undefined {
   if (value === undefined) {
@@ -93,6 +90,7 @@ blogRouter.get(
   async (req: Request<Record<string, never>, unknown, unknown, BlogListQuery>, res: Response) => {
     try {
       const status = req.query["filter[status]"];
+      const platform = req.query["filter[platform]"];
       const page = parseNonNegativeInteger(req.query.page, "page");
       const pageNo = parseNonNegativeInteger(req.query.pageNo, "pageNo");
       const limit = parseNonNegativeInteger(req.query.limit, "limit") ?? 25;
@@ -111,7 +109,13 @@ blogRouter.get(
           | "draft"
           | "approved"
           | "rejected"
-          | undefined)
+          | undefined),
+        site:
+          platform === "talent"
+            ? "talent.zigme.in"
+            : platform === "hiring"
+              ? "hiring.zigme.in"
+              : undefined
       }, {
         skip,
         limit

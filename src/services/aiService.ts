@@ -1,4 +1,4 @@
-import OpenAI from "openai";
+import { OpenAI } from "openai";
 import { config } from "../config.js";
 import type { SearchResult, SelectedNews } from "../models/blogVersion.js";
 
@@ -14,6 +14,21 @@ interface BlogGenerationResult {
 
 interface LatestNewsResult {
   items: SelectedNews[];
+}
+
+interface AIServiceResponse {
+  output_text: string;
+  output?: Array<{
+    type?: string;
+    action?: {
+      sources?: Array<{
+        url?: string;
+        title?: string;
+        snippet?: string;
+        excerpt?: string;
+      }>;
+    };
+  }>;
 }
 
 function normalizeUrl(value: unknown): string {
@@ -127,10 +142,10 @@ htmlContent
 generationNotes`;
 }
 
-function extractSources(response: OpenAI.Responses.Response): SearchResult[] {
+function extractSources(response: AIServiceResponse): SearchResult[] {
   const sourceMap = new Map<string, SearchResult>();
 
-  for (const item of (response.output || []) as Array<{ type?: string; action?: { sources?: Array<{ url?: string; title?: string; snippet?: string; excerpt?: string }> } }>) {
+  for (const item of response.output || []) {
     if (item.type !== "web_search_call") {
       continue;
     }
@@ -205,7 +220,7 @@ export async function generateBlog({
         }
       }
     }
-  } as any)) as OpenAI.Responses.Response;
+  } as any)) as AIServiceResponse;
 
   const parsed = parseJsonText<Omit<BlogGenerationResult, "sourceResults">>(response.output_text);
 
@@ -261,7 +276,7 @@ export async function fetchLatestNews(topic: string): Promise<LatestNewsResult> 
         }
       }
     }
-  } as any)) as OpenAI.Responses.Response;
+  } as any)) as AIServiceResponse;
 
   const parsed = parseJsonText<LatestNewsResult>(response.output_text);
 
@@ -323,7 +338,7 @@ export async function generateBlogFromNews({
         }
       }
     }
-  } as any)) as OpenAI.Responses.Response;
+  } as any)) as AIServiceResponse;
 
   const parsed = parseJsonText<Omit<BlogGenerationResult, "sourceResults">>(response.output_text);
 

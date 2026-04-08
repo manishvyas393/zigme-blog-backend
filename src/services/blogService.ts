@@ -2,7 +2,9 @@ import {
   BlogVersionModel,
   type BlogVersion,
   type BlogVersionDocument,
-  type SelectedNews
+  type SearchResult,
+  type SelectedNews,
+  type StoredSelectedNews
 } from "../models/blogVersion.js";
 import { fetchLatestNews, generateBlog, generateBlogFromNews } from "./aiService.js";
 import { sendApprovalEmail } from "./mailService.js";
@@ -27,12 +29,51 @@ interface BlogPagination {
   limit: number;
 }
 
+type BlogListStatus = "pending" | "approved" | "rejected";
+
+interface PublicBlogListItem {
+  _id: string;
+  site: BlogVersion["site"];
+  prompt: string;
+  title: string;
+  summary: string;
+  htmlContent: string;
+  status: BlogListStatus;
+  approvedFlag: boolean;
+  rejectedFlag: boolean;
+  selectedNews: SelectedNews | null;
+  sourceResults: SearchResult[];
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 interface BlogListResult {
-  data: BlogVersionDocument[];
+  data: PublicBlogListItem[];
   total: number;
   page: number;
   pages: number;
   limit: number;
+}
+
+interface PublicBlog {
+  _id: string;
+  blogGroupId: string;
+  revision: number;
+  site: BlogVersion["site"];
+  prompt: string;
+  searchQuery: string;
+  title: string;
+  summary: string;
+  htmlContent: string;
+  status: BlogVersion["status"];
+  approvedFlag: boolean;
+  rejectedFlag: boolean;
+  reviewToken: string;
+  selectedNews: SelectedNews | null;
+  sourceResults: SearchResult[];
+  generationNotes: string;
+  createdAt: Date;
+  updatedAt: Date;
 }
 
 function sanitizeSelectedNews(selectedNews: SelectedNews | null | undefined): SelectedNews | null {
@@ -49,6 +90,59 @@ function sanitizeSelectedNews(selectedNews: SelectedNews | null | undefined): Se
     snippet: selectedNews.snippet || "",
     sourceName: selectedNews.sourceName || "",
     publishedAt: selectedNews.publishedAt || ""
+  };
+}
+
+function toStoredSelectedNews(
+  selectedNews: SelectedNews | null | undefined
+): StoredSelectedNews | null {
+  if (!selectedNews) {
+    return null;
+  }
+
+  return {
+    title: selectedNews.title,
+    link: selectedNews.link,
+    snippet: selectedNews.snippet,
+    source_name: selectedNews.sourceName,
+    published_at: selectedNews.publishedAt
+  };
+}
+
+function fromStoredSelectedNews(selectedNews: StoredSelectedNews | null | undefined): SelectedNews | null {
+  if (!selectedNews) {
+    return null;
+  }
+
+  return {
+    title: selectedNews.title,
+    link: selectedNews.link,
+    snippet: selectedNews.snippet,
+    sourceName: selectedNews.source_name,
+    publishedAt: selectedNews.published_at
+  };
+}
+
+export function serializeBlog(blog: BlogVersionDocument): PublicBlog {
+  return {
+    _id: String(blog._id),
+    blogGroupId: blog.blog_group_id,
+    revision: blog.revision,
+    site: blog.site,
+    prompt: blog.prompt,
+    searchQuery: blog.search_query,
+    title: blog.title,
+    summary: blog.summary,
+    htmlContent: blog.html_content,
+    status: blog.status,
+    approvedFlag: blog.approved_flag,
+    rejectedFlag: blog.rejected_flag,
+    reviewToken: blog.review_token,
+    selectedNews: fromStoredSelectedNews(blog.selected_news),
+    sourceResults: blog.source_results,
+    generationNotes: blog.generation_notes,
+    createdAt: blog.created_at,
+    updatedAt: blog.updated_at
   };
 }
 
@@ -80,18 +174,18 @@ async function createVersion({
       });
 
   const blog = await BlogVersionModel.create({
-    blogGroupId,
+    blog_group_id: blogGroupId,
     revision,
     site,
     prompt,
-    searchQuery: prompt,
-    selectedNews: safeSelectedNews,
+    search_query: prompt,
+    selected_news: toStoredSelectedNews(safeSelectedNews),
     title: generated.title,
     summary: generated.summary,
-    htmlContent: generated.htmlContent,
-    sourceResults: generated.sourceResults,
-    generationNotes: generated.generationNotes,
-    reviewToken: generateReviewToken()
+    html_content: generated.htmlContent,
+    source_results: generated.sourceResults,
+    generation_notes: generated.generationNotes,
+    review_token: generateReviewToken()
   });
 
   return blog;
@@ -161,38 +255,38 @@ export async function sendForApproval(versionId: string) {
 }
 
 export async function approveByToken(reviewToken: string): Promise<BlogVersionDocument> {
-  const blog = await BlogVersionModel.findOne({ reviewToken });
+  const blog = await BlogVersionModel.findOne({ review_token: reviewToken });
 
   if (!blog) {
     throw new Error("Review token not found.");
   }
 
   blog.status = "approved";
-  blog.approvedFlag = true;
-  blog.rejectedFlag = false;
+  blog.approved_flag = true;
+  blog.rejected_flag = false;
   await blog.save();
 
   return blog;
 }
 
 export async function rejectAndRegenerateByToken(reviewToken: string) {
-  const blog = await BlogVersionModel.findOne({ reviewToken });
+  const blog = await BlogVersionModel.findOne({ review_token: reviewToken });
 
   if (!blog) {
     throw new Error("Review token not found.");
   }
 
   blog.status = "rejected";
-  blog.rejectedFlag = true;
-  blog.approvedFlag = false;
+  blog.rejected_flag = true;
+  blog.approved_flag = false;
   await blog.save();
 
   const nextRevision = await createVersion({
-    blogGroupId: blog.blogGroupId,
+    blogGroupId: blog.blog_group_id,
     revision: blog.revision + 1,
     site: blog.site,
     prompt: blog.prompt,
-    selectedNews: blog.selectedNews
+    selectedNews: fromStoredSelectedNews(blog.selected_news)
   });
 
   nextRevision.status = "pending_approval";
@@ -204,7 +298,7 @@ export async function rejectAndRegenerateByToken(reviewToken: string) {
 }
 
 export async function getBlogByReviewToken(reviewToken: string): Promise<BlogVersionDocument> {
-  const blog = await BlogVersionModel.findOne({ reviewToken });
+  const blog = await BlogVersionModel.findOne({ review_token: reviewToken });
 
   if (!blog) {
     throw new Error("Review token not found.");
@@ -218,15 +312,15 @@ export async function getBlogs(
   pagination: BlogPagination = { skip: 0, limit: 25 }
 ): Promise<BlogListResult> {
   const query: Partial<
-    Pick<BlogVersion, "approvedFlag" | "rejectedFlag" | "status">
+    Pick<BlogVersion, "approved_flag" | "rejected_flag" | "status">
   > = {};
 
   if (typeof filters.approved === "boolean") {
-    query.approvedFlag = filters.approved;
+    query.approved_flag = filters.approved;
   }
 
   if (typeof filters.rejected === "boolean") {
-    query.rejectedFlag = filters.rejected;
+    query.rejected_flag = filters.rejected;
   }
 
   if (filters.status) {
@@ -235,15 +329,38 @@ export async function getBlogs(
 
   const total = await BlogVersionModel.countDocuments(query);
   const items = await BlogVersionModel.find(query)
-    .sort({ createdAt: -1, revision: -1 })
+    .sort({ created_at: -1, revision: -1 })
     .skip(pagination.skip)
     .limit(pagination.limit);
 
   const page = pagination.limit > 0 ? Math.floor(pagination.skip / pagination.limit) : 0;
   const pages = pagination.limit > 0 ? Math.ceil(total / pagination.limit) : 0;
+  const normalizeBlogListStatus = (status: BlogVersion["status"]): BlogListStatus => {
+    if (status === "approved" || status === "rejected") {
+      return status;
+    }
+
+    return "pending";
+  };
+
+  const data = items.map((item) => ({
+    _id: String(item._id),
+    site: item.site,
+    prompt: item.prompt,
+    title: item.title,
+    summary: item.summary,
+    htmlContent: item.html_content,
+    status: normalizeBlogListStatus(item.status),
+    approvedFlag: item.approved_flag,
+    rejectedFlag: item.rejected_flag,
+    selectedNews: fromStoredSelectedNews(item.selected_news),
+    sourceResults: item.source_results,
+    createdAt: item.created_at,
+    updatedAt: item.updated_at
+  }));
 
   return {
-    data: items,
+    data,
     total,
     page,
     pages,

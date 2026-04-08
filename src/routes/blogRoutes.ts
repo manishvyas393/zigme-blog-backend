@@ -7,6 +7,7 @@ import {
   getLatestNews,
   getBlogByReviewToken,
   rejectAndRegenerateByToken,
+  serializeBlog,
   sendForApproval
 } from "../services/blogService.js";
 import type { SelectedNews } from "../models/blogVersion.js";
@@ -27,7 +28,7 @@ interface GenerateFromNewsBody {
   selectedNews?: SelectedNews;
 }
 
-type BlogStatus = "draft" | "pending_approval" | "approved" | "rejected";
+type BlogStatus = "draft" | "pending" | "approved" | "rejected";
 
 interface BlogListQuery {
   "filter[approved]"?: string;
@@ -39,7 +40,7 @@ interface BlogListQuery {
   skip?: string;
 }
 
-const validStatuses: BlogStatus[] = ["draft", "pending_approval", "approved", "rejected"];
+const validStatuses: BlogStatus[] = ["draft", "pending", "approved", "rejected"];
 
 function parseBooleanFilter(value: string | undefined): boolean | undefined {
   if (value === undefined) {
@@ -87,14 +88,18 @@ blogRouter.get(
 
       if (status && !validStatuses.includes(status as BlogStatus)) {
         return res.status(400).json({
-          message: "Status must be one of: draft, pending_approval, approved, rejected."
+          message: "Status must be one of: draft, pending, approved, rejected."
         });
       }
 
       const blogs = await getBlogs({
         approved,
         rejected,
-        status: status as BlogStatus | undefined
+        status: status === "pending" ? "pending_approval" : (status as
+          | "draft"
+          | "approved"
+          | "rejected"
+          | undefined)
       }, {
         skip,
         limit
@@ -119,7 +124,7 @@ blogRouter.post(
       }
 
       const blog = await generateDraft({ site, prompt });
-      return res.status(201).json(blog);
+      return res.status(201).json(serializeBlog(blog));
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown error";
       return res.status(500).json({ message });
@@ -162,7 +167,7 @@ blogRouter.post(
         selectedNews
       });
 
-      return res.status(201).json(blog);
+      return res.status(201).json(serializeBlog(blog));
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown error";
       return res.status(500).json({ message });
@@ -173,7 +178,10 @@ blogRouter.post(
 blogRouter.post("/:id/send-for-approval", async (req: Request<{ id: string }>, res: Response) => {
   try {
     const result = await sendForApproval(req.params.id);
-    return res.json(result);
+    return res.json({
+      blog: serializeBlog(result.blog),
+      mailResult: result.mailResult
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";
     return res.status(500).json({ message });
@@ -185,7 +193,7 @@ blogRouter.get(
   async (req: Request<{ reviewToken: string }>, res: Response) => {
     try {
       const blog = await getBlogByReviewToken(req.params.reviewToken);
-      return res.json(blog);
+      return res.json(serializeBlog(blog));
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown error";
       return res.status(404).json({ message });
@@ -198,7 +206,7 @@ blogRouter.post(
   async (req: Request<{ reviewToken: string }>, res: Response) => {
     try {
       const blog = await approveByToken(req.params.reviewToken);
-      return res.json(blog);
+      return res.json(serializeBlog(blog));
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown error";
       return res.status(404).json({ message });
@@ -211,7 +219,11 @@ blogRouter.post(
   async (req: Request<{ reviewToken: string }>, res: Response) => {
     try {
       const result = await rejectAndRegenerateByToken(req.params.reviewToken);
-      return res.json(result);
+      return res.json({
+        rejectedBlog: serializeBlog(result.rejectedBlog),
+        regeneratedBlog: serializeBlog(result.regeneratedBlog),
+        mailResult: result.mailResult
+      });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown error";
       return res.status(404).json({ message });

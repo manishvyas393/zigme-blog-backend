@@ -17,7 +17,7 @@ function createClient(): postmark.ServerClient | null {
 
 export async function sendApprovalEmail(blog: BlogVersionDocument): Promise<MailResult> {
   const client = createClient();
-  const reviewUrl = `${config.clientUrl}/review/${blog.reviewToken}`;
+  const reviewUrl = `${config.clientUrl}/review/${blog.review_token}`;
 
   if (!client) {
     return {
@@ -74,4 +74,3 @@ export async function sendApprovalEmail(blog: BlogVersionDocument): Promise<Mail
 
   return { delivered: true, message: `Approval email sent to ${config.approvalEmail}` };
 }
-

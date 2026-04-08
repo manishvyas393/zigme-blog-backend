@@ -14,24 +14,32 @@ export interface SelectedNews {
   publishedAt: string;
 }
 
+export interface StoredSelectedNews {
+  title: string;
+  link: string;
+  snippet: string;
+  source_name: string;
+  published_at: string;
+}
+
 export interface BlogVersion {
-  blogGroupId: string;
+  blog_group_id: string;
   revision: number;
   site: "hiring.zigme.in" | "talent.zigme.in";
   prompt: string;
-  searchQuery: string;
+  search_query: string;
   title: string;
   summary: string;
-  htmlContent: string;
+  html_content: string;
   status: "draft" | "pending_approval" | "approved" | "rejected";
-  approvedFlag: boolean;
-  rejectedFlag: boolean;
-  reviewToken: string;
-  selectedNews: SelectedNews | null;
-  sourceResults: SearchResult[];
-  generationNotes: string;
-  createdAt: Date;
-  updatedAt: Date;
+  approved_flag: boolean;
+  rejected_flag: boolean;
+  review_token: string;
+  selected_news: StoredSelectedNews | null;
+  source_results: SearchResult[];
+  generation_notes: string;
+  created_at: Date;
+  updated_at: Date;
 }
 
 const searchResultSchema = new mongoose.Schema<SearchResult>(
@@ -43,20 +51,20 @@ const searchResultSchema = new mongoose.Schema<SearchResult>(
   { _id: false }
 );
 
-const selectedNewsSchema = new mongoose.Schema<SelectedNews>(
+const selectedNewsSchema = new mongoose.Schema<StoredSelectedNews>(
   {
     title: { type: String, required: true },
     link: { type: String, required: true },
     snippet: { type: String, default: "" },
-    sourceName: { type: String, default: "" },
-    publishedAt: { type: String, default: "" }
+    source_name: { type: String, default: "" },
+    published_at: { type: String, default: "" }
   },
   { _id: false }
 );
 
 const blogVersionSchema = new mongoose.Schema<BlogVersion>(
   {
-    blogGroupId: { type: String, required: true, index: true },
+    blog_group_id: { type: String, required: true, index: true },
     revision: { type: Number, required: true },
     site: {
       type: String,
@@ -64,23 +72,28 @@ const blogVersionSchema = new mongoose.Schema<BlogVersion>(
       required: true
     },
     prompt: { type: String, required: true },
-    searchQuery: { type: String, required: true },
+    search_query: { type: String, required: true },
     title: { type: String, required: true },
     summary: { type: String, required: true },
-    htmlContent: { type: String, required: true },
+    html_content: { type: String, required: true },
     status: {
       type: String,
       enum: ["draft", "pending_approval", "approved", "rejected"],
       default: "draft"
     },
-    approvedFlag: { type: Boolean, default: false },
-    rejectedFlag: { type: Boolean, default: false },
-    reviewToken: { type: String, required: true, unique: true, index: true },
-    selectedNews: { type: selectedNewsSchema, default: null },
-    sourceResults: { type: [searchResultSchema], default: [] },
-    generationNotes: { type: String, default: "" }
+    approved_flag: { type: Boolean, default: false },
+    rejected_flag: { type: Boolean, default: false },
+    review_token: { type: String, required: true, unique: true, index: true },
+    selected_news: { type: selectedNewsSchema, default: null },
+    source_results: { type: [searchResultSchema], default: [] },
+    generation_notes: { type: String, default: "" }
   },
-  { timestamps: true }
+  {
+    timestamps: {
+      createdAt: "created_at",
+      updatedAt: "updated_at"
+    }
+  }
 );
 
 export type BlogVersionDocument = HydratedDocument<BlogVersion>;

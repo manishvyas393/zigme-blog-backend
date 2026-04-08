@@ -52,7 +52,7 @@ function normalizeUrl(value: unknown): string {
 function getRecentNewsWindow(): { startDate: string; endDate: string } {
   const endDate = new Date();
   const startDate = new Date();
-  startDate.setDate(endDate.getDate() - 7);
+  startDate.setDate(endDate.getDate() - 2);
 
   const toDateString = (value: Date): string => value.toISOString().slice(0, 10);
 

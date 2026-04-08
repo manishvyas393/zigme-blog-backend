@@ -23,15 +23,17 @@ All query parameters are optional.
 
 - `page` and `pageNo` are treated as the same paging input.
 - If `skip` is not provided, it is calculated as `(pageNo ?? page ?? 0) * limit`.
-- Results are sorted by `updated_at` descending, then `created_at` and `revision`.
+- Results are sorted by `updated_at` descending, then `created_at`, then `revision`.
 - `filter[platform]=talent` maps to `site = talent.zigme.in`.
 - `filter[platform]=hiring` maps to `site = hiring.zigme.in`.
 - Any other `filter[platform]` value leaves the list unfiltered by platform.
+- `filter[status]=draft` returns draft rows with `status: "draft"` in the response.
+- `filter[status]=pending` maps to internal `pending_approval`.
 
 ### Example Request
 
 ```http
-GET /api/blogs?filter[status]=approved&page=0&limit=25
+GET /api/blogs?filter[status]=approved&filter[platform]=talent&page=0&limit=25
 ```
 
 ## API Response Structure

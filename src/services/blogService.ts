@@ -20,6 +20,7 @@ interface CreateVersionInput {
 
 interface BlogFilters {
   status?: BlogVersion["status"];
+  publicStatus?: "draft" | "pending" | "approved" | "rejected";
   site?: BlogVersion["site"];
 }
 
@@ -324,17 +325,6 @@ export async function getBlogs(
 
   const page = pagination.limit > 0 ? Math.floor(pagination.skip / pagination.limit) : 0;
   const pages = pagination.limit > 0 ? Math.ceil(total / pagination.limit) : 0;
-  const responseStatusForFilter = (status: BlogVersion["status"]): BlogListStatus => {
-    if (status === "draft") {
-      return "pending";
-    }
-
-    if (status === "pending_approval") {
-      return "pending";
-    }
-
-    return status;
-  };
 
   const data = items.map((item) => ({
     _id: String(item._id),
@@ -344,11 +334,15 @@ export async function getBlogs(
     summary: item.summary,
     html_content: item.html_content,
     status: (
-      filters.status === "draft"
+      filters.publicStatus === "draft"
         ? "draft"
-        : filters.status === "pending_approval"
+        : filters.publicStatus === "pending"
           ? "pending"
-          : responseStatusForFilter(item.status)
+          : item.status === "draft"
+            ? "pending"
+            : item.status === "pending_approval"
+              ? "pending"
+              : item.status
     ) as BlogListStatus,
     created_at: item.created_at,
     updated_at: item.updated_at

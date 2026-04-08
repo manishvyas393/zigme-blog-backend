@@ -123,6 +123,7 @@ blogRouter.get(
           | "approved"
           | "rejected"
           | undefined),
+        publicStatus: status as "draft" | "pending" | "approved" | "rejected" | undefined,
         site:
           platform === "talent"
             ? "talent.zigme.in"

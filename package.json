@@ -8,7 +8,8 @@
     "build": "tsc -p tsconfig.json",
     "start": "tsx src/index.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "migrate:snake-case": "tsx src/scripts/migrateBlogSchemaToSnakeCase.ts"
+    "migrate:snake-case": "tsx src/scripts/migrateBlogSchemaToSnakeCase.ts",
+    "group:blogs": "tsx src/scripts/groupBlogsByFirstId.ts"
   },
   "dependencies": {
     "cors": "^2.8.5",

@@ -28,7 +28,7 @@ All query parameters are optional.
 - `filter[platform]=hiring` maps to `site = hiring.zigme.in`.
 - Any other `filter[platform]` value leaves the list unfiltered by platform.
 - `filter[status]=draft` returns draft rows with `status: "draft"` in the response.
-- `filter[status]=pending` maps to internal `pending_approval`.
+- `filter[status]=pending` returns rows with `status: "pending"` in the response.
 
 ### Example Request
 

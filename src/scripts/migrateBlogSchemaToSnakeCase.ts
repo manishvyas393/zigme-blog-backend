@@ -23,9 +23,6 @@ async function migrate(): Promise<void> {
           blog_group_id: { $ifNull: ["$blog_group_id", "$blogGroupId"] },
           search_query: { $ifNull: ["$search_query", "$searchQuery"] },
           html_content: { $ifNull: ["$html_content", "$htmlContent"] },
-          approved_flag: { $ifNull: ["$approved_flag", "$approvedFlag"] },
-          rejected_flag: { $ifNull: ["$rejected_flag", "$rejectedFlag"] },
-          review_token: { $ifNull: ["$review_token", "$reviewToken"] },
           generation_notes: { $ifNull: ["$generation_notes", "$generationNotes"] },
           created_at: { $ifNull: ["$created_at", "$createdAt"] },
           updated_at: { $ifNull: ["$updated_at", "$updatedAt"] },
@@ -76,7 +73,6 @@ async function migrate(): Promise<void> {
     ]
   );
 
-  await dropIndexIfExists("reviewToken_1");
   await dropIndexIfExists("blogGroupId_1");
 
   const unsetResult = await BlogVersionModel.collection.updateMany(
@@ -87,9 +83,6 @@ async function migrate(): Promise<void> {
           "blogGroupId",
           "searchQuery",
           "htmlContent",
-          "approvedFlag",
-          "rejectedFlag",
-          "reviewToken",
           "selectedNews",
           "sourceResults",
           "generationNotes",
@@ -101,10 +94,6 @@ async function migrate(): Promise<void> {
   );
 
   await BlogVersionModel.collection.createIndex({ blog_group_id: 1 }, { name: "blog_group_id_1" });
-  await BlogVersionModel.collection.createIndex(
-    { review_token: 1 },
-    { name: "review_token_1", unique: true }
-  );
 
   console.log(
     `Migration complete. Copied ${copyResult.modifiedCount} docs and cleaned ${unsetResult.modifiedCount} docs.`

@@ -8,10 +8,10 @@ import {
 } from "../models/blogVersion.js";
 import { fetchLatestNews, generateBlog, generateBlogFromNews } from "./aiService.js";
 import { sendApprovalEmail } from "./mailService.js";
-import { generateId, generateReviewToken } from "../utils/tokens.js";
+import { generateId } from "../utils/tokens.js";
 
 interface CreateVersionInput {
-  blogGroupId: string;
+  blogGroupId?: string;
   revision: number;
   site: string;
   prompt: string;
@@ -20,7 +20,6 @@ interface CreateVersionInput {
 
 interface BlogFilters {
   status?: BlogVersion["status"];
-  publicStatus?: "draft" | "pending" | "approved" | "rejected";
   site?: BlogVersion["site"];
 }
 
@@ -29,7 +28,7 @@ interface BlogPagination {
   limit: number;
 }
 
-type BlogListStatus = "pending" | "approved" | "rejected";
+type BlogListStatus = "draft" | "pending" | "approved" | "rejected";
 
 interface PublicBlogListItem {
   _id: string;
@@ -62,9 +61,6 @@ interface PublicBlog {
   summary: string;
   html_content: string;
   status: BlogVersion["status"];
-  approved_flag: boolean;
-  rejected_flag: boolean;
-  review_token: string;
   selected_news: StoredSelectedNews | null;
   source_results: SearchResult[];
   generation_notes: string;
@@ -131,9 +127,6 @@ export function serializeBlog(blog: BlogVersionDocument): PublicBlog {
     summary: blog.summary,
     html_content: blog.html_content,
     status: blog.status,
-    approved_flag: blog.approved_flag,
-    rejected_flag: blog.rejected_flag,
-    review_token: blog.review_token,
     selected_news: blog.selected_news,
     source_results: blog.source_results,
     generation_notes: blog.generation_notes,
@@ -166,7 +159,7 @@ async function createVersion({
       });
 
   const blog = await BlogVersionModel.create({
-    blog_group_id: blogGroupId,
+    blog_group_id: blogGroupId || generateId(),
     revision,
     site,
     prompt,
@@ -177,8 +170,12 @@ async function createVersion({
     html_content: generated.htmlContent,
     source_results: generated.sourceResults,
     generation_notes: generated.generationNotes,
-    review_token: generateReviewToken()
   });
+
+  if (!blogGroupId) {
+    blog.blog_group_id = String(blog._id);
+    await blog.save();
+  }
 
   return blog;
 }
@@ -190,10 +187,7 @@ export async function generateDraft({
   site: string;
   prompt: string;
 }): Promise<BlogVersionDocument> {
-  const blogGroupId = generateId();
-
   return createVersion({
-    blogGroupId,
     revision: 1,
     site,
     prompt
@@ -219,11 +213,9 @@ export async function generateDraftFromNews({
   prompt: string;
   selectedNews: SelectedNews;
 }): Promise<BlogVersionDocument> {
-  const blogGroupId = generateId();
   const safeSelectedNews = sanitizeSelectedNews(selectedNews);
 
   return createVersion({
-    blogGroupId,
     revision: 1,
     site,
     prompt,
@@ -238,7 +230,7 @@ export async function sendForApproval(versionId: string) {
     throw new Error("Blog version not found.");
   }
 
-  blog.status = "pending_approval";
+  blog.status = "pending";
   await blog.save();
 
   const mailResult = await sendApprovalEmail(blog);
@@ -246,31 +238,27 @@ export async function sendForApproval(versionId: string) {
   return { blog, mailResult };
 }
 
-export async function approveByToken(reviewToken: string): Promise<BlogVersionDocument> {
-  const blog = await BlogVersionModel.findOne({ review_token: reviewToken });
+export async function approveByToken(id: string): Promise<BlogVersionDocument> {
+  const blog = await BlogVersionModel.findById(id);
 
   if (!blog) {
-    throw new Error("Review token not found.");
+    throw new Error("Review blog not found.");
   }
 
   blog.status = "approved";
-  blog.approved_flag = true;
-  blog.rejected_flag = false;
   await blog.save();
 
   return blog;
 }
 
-export async function rejectAndRegenerateByToken(reviewToken: string) {
-  const blog = await BlogVersionModel.findOne({ review_token: reviewToken });
+export async function rejectAndRegenerateByToken(id: string) {
+  const blog = await BlogVersionModel.findById(id);
 
   if (!blog) {
-    throw new Error("Review token not found.");
+    throw new Error("Review blog not found.");
   }
 
   blog.status = "rejected";
-  blog.rejected_flag = true;
-  blog.approved_flag = false;
   await blog.save();
 
   const nextRevision = await createVersion({
@@ -281,7 +269,7 @@ export async function rejectAndRegenerateByToken(reviewToken: string) {
     selectedNews: fromStoredSelectedNews(blog.selected_news)
   });
 
-  nextRevision.status = "pending_approval";
+  nextRevision.status = "pending";
   await nextRevision.save();
 
   const mailResult = await sendApprovalEmail(nextRevision);
@@ -289,11 +277,11 @@ export async function rejectAndRegenerateByToken(reviewToken: string) {
   return { rejectedBlog: blog, regeneratedBlog: nextRevision, mailResult };
 }
 
-export async function getBlogByReviewToken(reviewToken: string): Promise<BlogVersionDocument> {
-  const blog = await BlogVersionModel.findOne({ review_token: reviewToken });
+export async function getBlogByReviewToken(id: string): Promise<BlogVersionDocument> {
+  const blog = await BlogVersionModel.findById(id);
 
   if (!blog) {
-    throw new Error("Review token not found.");
+    throw new Error("Review blog not found.");
   }
 
   return blog;
@@ -329,17 +317,7 @@ export async function getBlogs(
     title: item.title,
     summary: item.summary,
     html_content: item.html_content,
-    status: (
-      filters.publicStatus === "draft"
-        ? "draft"
-        : filters.publicStatus === "pending"
-          ? "pending"
-          : item.status === "draft"
-            ? "pending"
-            : item.status === "pending_approval"
-              ? "pending"
-              : item.status
-    ) as BlogListStatus,
+    status: (item.status === "draft" ? "draft" : item.status === "pending" ? "pending" : item.status === "approved" ? "approved" : "rejected") as BlogListStatus,
     created_at: item.created_at,
     updated_at: item.updated_at
   }));

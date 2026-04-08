@@ -31,10 +31,7 @@ export interface BlogVersion {
   title: string;
   summary: string;
   html_content: string;
-  status: "draft" | "pending_approval" | "approved" | "rejected";
-  approved_flag: boolean;
-  rejected_flag: boolean;
-  review_token: string;
+  status: "draft" | "pending" | "approved" | "rejected";
   selected_news: StoredSelectedNews | null;
   source_results: SearchResult[];
   generation_notes: string;
@@ -78,12 +75,9 @@ const blogVersionSchema = new mongoose.Schema<BlogVersion>(
     html_content: { type: String, required: true },
     status: {
       type: String,
-      enum: ["draft", "pending_approval", "approved", "rejected"],
+      enum: ["draft", "pending", "approved", "rejected"],
       default: "draft"
     },
-    approved_flag: { type: Boolean, default: false },
-    rejected_flag: { type: Boolean, default: false },
-    review_token: { type: String, required: true, unique: true, index: true },
     selected_news: { type: selectedNewsSchema, default: null },
     source_results: { type: [searchResultSchema], default: [] },
     generation_notes: { type: String, default: "" }

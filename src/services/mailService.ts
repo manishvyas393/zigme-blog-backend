@@ -17,7 +17,7 @@ function createClient(): postmark.ServerClient | null {
 
 export async function sendApprovalEmail(blog: BlogVersionDocument): Promise<MailResult> {
   const client = createClient();
-  const reviewUrl = `${config.clientUrl}/review/${blog.review_token}`;
+  const reviewUrl = `${config.clientUrl}/review/${blog._id}`;
 
   if (!client) {
     return {

@@ -118,12 +118,12 @@ blogRouter.get(
       }
 
       const blogs = await getBlogs({
-        status: status === "pending" ? "pending_approval" : (status as
+        status: status as
           | "draft"
+          | "pending"
           | "approved"
           | "rejected"
-          | undefined),
-        publicStatus: status as "draft" | "pending" | "approved" | "rejected" | undefined,
+          | undefined,
         site:
           platform === "talent"
             ? "talent.zigme.in"
@@ -222,10 +222,10 @@ blogRouter.post("/:id/send-for-approval", async (req: Request<{ id: string }>, r
 });
 
 blogRouter.get(
-  "/review/:reviewToken",
-  async (req: Request<{ reviewToken: string }>, res: Response) => {
+  "/review/:id",
+  async (req: Request<{ id: string }>, res: Response) => {
     try {
-      const blog = await getBlogByReviewToken(req.params.reviewToken);
+      const blog = await getBlogByReviewToken(req.params.id);
       return res.json(serializeBlog(blog));
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown error";
@@ -235,10 +235,10 @@ blogRouter.get(
 );
 
 blogRouter.post(
-  "/review/:reviewToken/approve",
-  async (req: Request<{ reviewToken: string }>, res: Response) => {
+  "/review/:id/approve",
+  async (req: Request<{ id: string }>, res: Response) => {
     try {
-      const blog = await approveByToken(req.params.reviewToken);
+      const blog = await approveByToken(req.params.id);
       return res.json(serializeBlog(blog));
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown error";
@@ -248,10 +248,10 @@ blogRouter.post(
 );
 
 blogRouter.post(
-  "/review/:reviewToken/reject",
-  async (req: Request<{ reviewToken: string }>, res: Response) => {
+  "/review/:id/reject",
+  async (req: Request<{ id: string }>, res: Response) => {
     try {
-      const result = await rejectAndRegenerateByToken(req.params.reviewToken);
+      const result = await rejectAndRegenerateByToken(req.params.id);
       return res.json({
         rejected_blog: serializeBlog(result.rejectedBlog),
         regenerated_blog: serializeBlog(result.regeneratedBlog),

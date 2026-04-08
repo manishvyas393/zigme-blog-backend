@@ -1,0 +1,27 @@
+services:
+  - type: web
+    name: zigme-blog-server
+    runtime: node
+    rootDir: .
+    buildCommand: npm install
+    startCommand: npm start
+    plan: free
+    envVars:
+      - key: PORT
+        value: 10000
+      - key: CLIENT_URL
+        sync: false
+      - key: MONGODB_URI
+        sync: false
+      - key: DNS_SERVERS
+        value: 8.8.8.8,1.1.1.1
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: BLOG_MODEL
+        value: gpt-4.1
+      - key: POSTMARK_SERVER_TOKEN
+        sync: false
+      - key: MAIL_FROM
+        sync: false
+      - key: APPROVAL_EMAIL
+        value: manish@zigme.in

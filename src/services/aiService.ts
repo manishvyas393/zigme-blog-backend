@@ -1,0 +1,334 @@
+import OpenAI from "openai";
+import { config } from "../config.js";
+import type { SearchResult, SelectedNews } from "../models/blogVersion.js";
+
+const openai = config.openAiApiKey ? new OpenAI({ apiKey: config.openAiApiKey }) : null;
+
+interface BlogGenerationResult {
+  title: string;
+  summary: string;
+  htmlContent: string;
+  generationNotes: string;
+  sourceResults: SearchResult[];
+}
+
+interface LatestNewsResult {
+  items: SelectedNews[];
+}
+
+function normalizeUrl(value: unknown): string {
+  if (!value) {
+    return "";
+  }
+
+  const trimmed = String(value).trim();
+
+  if (/^https?:\/\//i.test(trimmed)) {
+    return trimmed;
+  }
+
+  if (/^[\w.-]+\.[a-z]{2,}(\/.*)?$/i.test(trimmed)) {
+    return `https://${trimmed}`;
+  }
+
+  return "";
+}
+
+function getRecentNewsWindow(): { startDate: string; endDate: string } {
+  const endDate = new Date();
+  const startDate = new Date();
+  startDate.setDate(endDate.getDate() - 7);
+
+  const toDateString = (value: Date): string => value.toISOString().slice(0, 10);
+
+  return {
+    startDate: toDateString(startDate),
+    endDate: toDateString(endDate)
+  };
+}
+
+function buildResearchPrompt(site: string, prompt: string): string {
+  return `Research and write a professional, uncontroversial blog for ${site}.
+Topic prompt: ${prompt}
+
+Instructions:
+- Search the web first and use the findings to ground the blog.
+- Prefer practical, business-safe, non-controversial guidance.
+- Avoid political, medical, legal, or sensational claims.
+- Do not invent facts.
+- Summarize clearly for business readers.
+- Do not include markdown links anywhere in the response.
+- Do not include raw source URLs anywhere in the response.
+- Do not include inline citations, source names, or reference lists inside title, summary, or htmlContent.
+- Use sources only for research grounding, not as visible output text.
+
+Return JSON with exactly these keys:
+title
+summary
+htmlContent
+generationNotes`;
+}
+
+function buildNewsPrompt(topic: string): string {
+  const { startDate, endDate } = getRecentNewsWindow();
+
+  return `Search the web for the 5 latest important news items about: ${topic}
+
+Instructions:
+- Focus on recent news and current developments.
+- Only use news published between ${startDate} and ${endDate}.
+- Prefer reputable publications.
+- Return exactly 5 items when possible.
+- Keep each snippet short and factual.
+- Use ISO-style date strings when a publication date is available.
+- Exclude items older than ${startDate}.
+
+Return JSON with exactly this shape:
+{
+  "items": [
+    {
+      "title": "string",
+      "link": "string",
+      "snippet": "string",
+      "sourceName": "string",
+      "publishedAt": "string"
+    }
+  ]
+}`;
+}
+
+function buildNewsBasedBlogPrompt(site: string, prompt: string, selectedNews: SelectedNews): string {
+  return `Research and write a professional, uncontroversial blog for ${site}.
+Main topic prompt: ${prompt}
+
+Selected news item:
+Title: ${selectedNews.title}
+Link: ${selectedNews.link}
+Source: ${selectedNews.sourceName || "Unknown source"}
+Published at: ${selectedNews.publishedAt || "Unknown date"}
+Snippet: ${selectedNews.snippet || "No snippet provided"}
+
+Instructions:
+- Use the selected news item as the anchor for the article.
+- Search the web for supporting context before writing.
+- Prefer practical, business-safe, non-controversial guidance.
+- Avoid political, medical, legal, or sensational claims.
+- Do not invent facts.
+- Summarize clearly for business readers.
+- Do not include markdown links anywhere in the response.
+- Do not include raw source URLs anywhere in the response.
+- Do not include inline citations, source names, or reference lists inside title, summary, or htmlContent.
+- Use sources only for research grounding, not as visible output text.
+
+Return JSON with exactly these keys:
+title
+summary
+htmlContent
+generationNotes`;
+}
+
+function extractSources(response: OpenAI.Responses.Response): SearchResult[] {
+  const sourceMap = new Map<string, SearchResult>();
+
+  for (const item of (response.output || []) as Array<{ type?: string; action?: { sources?: Array<{ url?: string; title?: string; snippet?: string; excerpt?: string }> } }>) {
+    if (item.type !== "web_search_call") {
+      continue;
+    }
+
+    const sources = item.action?.sources || [];
+
+    for (const source of sources) {
+      const normalizedLink = normalizeUrl(source.url || "");
+
+      if (!normalizedLink || sourceMap.has(normalizedLink)) {
+        continue;
+      }
+
+      sourceMap.set(normalizedLink, {
+        title: source.title || "Untitled result",
+        link: normalizedLink,
+        snippet: source.snippet || source.excerpt || "Source collected from OpenAI web search."
+      });
+    }
+  }
+
+  return Array.from(sourceMap.values()).slice(0, 8);
+}
+
+function parseJsonText<T>(value: string): T {
+  return JSON.parse(value) as T;
+}
+
+export async function generateBlog({
+  site,
+  prompt
+}: {
+  site: string;
+  prompt: string;
+}): Promise<BlogGenerationResult> {
+  if (!openai) {
+    return {
+      title: `Draft blog for ${site}: ${prompt}`,
+      summary: "OpenAI API key is missing, so this is a placeholder draft.",
+      htmlContent: `
+        <article>
+          <h1>Draft blog for ${site}</h1>
+          <p>This placeholder was created because <code>OPENAI_API_KEY</code> is not configured.</p>
+          <h2>Requested topic</h2>
+          <p>${prompt}</p>
+        </article>
+      `,
+      generationNotes: "Placeholder generated because OPENAI_API_KEY is not configured.",
+      sourceResults: []
+    };
+  }
+
+  const response = (await openai.responses.create({
+    model: config.blogModel,
+    include: ["web_search_call.action.sources"] as any,
+    tools: [{ type: "web_search" }],
+    input: buildResearchPrompt(site, prompt),
+    text: {
+      format: {
+        type: "json_schema",
+        name: "blog_generation",
+        schema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            title: { type: "string" },
+            summary: { type: "string" },
+            htmlContent: { type: "string" },
+            generationNotes: { type: "string" }
+          },
+          required: ["title", "summary", "htmlContent", "generationNotes"]
+        }
+      }
+    }
+  } as any)) as OpenAI.Responses.Response;
+
+  const parsed = parseJsonText<Omit<BlogGenerationResult, "sourceResults">>(response.output_text);
+
+  return {
+    ...parsed,
+    sourceResults: extractSources(response)
+  };
+}
+
+export async function fetchLatestNews(topic: string): Promise<LatestNewsResult> {
+  if (!openai) {
+    return {
+      items: Array.from({ length: 5 }, (_, index) => ({
+        title: `Placeholder latest news ${index + 1} for ${topic}`,
+        link: "https://example.com/news-placeholder",
+        snippet: "Configure OPENAI_API_KEY to fetch live latest news.",
+        sourceName: "Placeholder",
+        publishedAt: ""
+      }))
+    };
+  }
+
+  const response = (await openai.responses.create({
+    model: config.blogModel,
+    include: ["web_search_call.action.sources"] as any,
+    tools: [{ type: "web_search" }],
+    input: buildNewsPrompt(topic),
+    text: {
+      format: {
+        type: "json_schema",
+        name: "latest_news",
+        schema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            items: {
+              type: "array",
+              items: {
+                type: "object",
+                additionalProperties: false,
+                properties: {
+                  title: { type: "string" },
+                  link: { type: "string" },
+                  snippet: { type: "string" },
+                  sourceName: { type: "string" },
+                  publishedAt: { type: "string" }
+                },
+                required: ["title", "link", "snippet", "sourceName", "publishedAt"]
+              }
+            }
+          },
+          required: ["items"]
+        }
+      }
+    }
+  } as any)) as OpenAI.Responses.Response;
+
+  const parsed = parseJsonText<LatestNewsResult>(response.output_text);
+
+  return {
+    items: parsed.items
+      .slice(0, 5)
+      .map((item) => ({
+        ...item,
+        link: normalizeUrl(item.link)
+      }))
+      .filter((item) => item.link)
+  };
+}
+
+export async function generateBlogFromNews({
+  site,
+  prompt,
+  selectedNews
+}: {
+  site: string;
+  prompt: string;
+  selectedNews: SelectedNews;
+}): Promise<BlogGenerationResult> {
+  if (!openai) {
+    return {
+      title: `Draft blog for ${site}: ${selectedNews.title}`,
+      summary: "OpenAI API key is missing, so this is a placeholder draft.",
+      htmlContent: `
+        <article>
+          <h1>${selectedNews.title}</h1>
+          <p>This placeholder was created because <code>OPENAI_API_KEY</code> is not configured.</p>
+          <p>${selectedNews.snippet || ""}</p>
+        </article>
+      `,
+      generationNotes: "Placeholder generated because OPENAI_API_KEY is not configured.",
+      sourceResults: []
+    };
+  }
+
+  const response = (await openai.responses.create({
+    model: config.blogModel,
+    include: ["web_search_call.action.sources"] as any,
+    tools: [{ type: "web_search" }],
+    input: buildNewsBasedBlogPrompt(site, prompt, selectedNews),
+    text: {
+      format: {
+        type: "json_schema",
+        name: "blog_generation_from_news",
+        schema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            title: { type: "string" },
+            summary: { type: "string" },
+            htmlContent: { type: "string" },
+            generationNotes: { type: "string" }
+          },
+          required: ["title", "summary", "htmlContent", "generationNotes"]
+        }
+      }
+    }
+  } as any)) as OpenAI.Responses.Response;
+
+  const parsed = parseJsonText<Omit<BlogGenerationResult, "sourceResults">>(response.output_text);
+
+  return {
+    ...parsed,
+    sourceResults: extractSources(response)
+  };
+}

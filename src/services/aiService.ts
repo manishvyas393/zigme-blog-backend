@@ -1,9 +1,9 @@
 import { OpenAI } from "openai";
 import { config } from "../config.js";
+import { LatestNewsCacheModel } from "../models/latestNewsCache.js";
 import type { SearchResult, SelectedNews } from "../models/blogVersion.js";
 
 const openai = config.openAiApiKey ? new OpenAI({ apiKey: config.openAiApiKey }) : null;
-const latestNewsCache = new Map<string, { expiresAt: number; items: SelectedNews[] }>();
 const LATEST_NEWS_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 
 class ExternalServiceError extends Error {
@@ -201,6 +201,10 @@ function parseNewsDate(value: string | undefined): number {
   return Number.isNaN(parsed) ? 0 : parsed;
 }
 
+function buildLatestNewsCacheKey(topic: string, startDate: string, endDate: string): string {
+  return `${topic.trim().toLowerCase()}|${startDate}|${endDate}`;
+}
+
 function isOpenAIQuotaError(error: unknown): boolean {
   const status = typeof error === "object" && error !== null ? (error as { status?: number }).status : undefined;
   const message = error instanceof Error ? error.message : String(error || "");
@@ -282,10 +286,13 @@ export async function generateBlog({
 
 export async function fetchLatestNews(topic: string): Promise<LatestNewsResult> {
   const { startDate, endDate } = getRecentNewsWindow();
-  const cacheKey = `${topic.trim().toLowerCase()}|${startDate}|${endDate}`;
-  const cached = latestNewsCache.get(cacheKey);
+  const cacheKey = buildLatestNewsCacheKey(topic, startDate, endDate);
+  const cached = await LatestNewsCacheModel.findOne({
+    cache_key: cacheKey,
+    expires_at: { $gt: new Date() }
+  }).lean();
 
-  if (cached && cached.expiresAt > Date.now()) {
+  if (cached) {
     return {
       items: cached.items
     };
@@ -300,10 +307,18 @@ export async function fetchLatestNews(topic: string): Promise<LatestNewsResult> 
         publishedAt: ""
       }));
 
-    latestNewsCache.set(cacheKey, {
-      items,
-      expiresAt: Date.now() + LATEST_NEWS_CACHE_TTL_MS
-    });
+    await LatestNewsCacheModel.findOneAndUpdate(
+      { cache_key: cacheKey },
+      {
+        cache_key: cacheKey,
+        topic,
+        start_date: startDate,
+        end_date: endDate,
+        items,
+        expires_at: new Date(Date.now() + LATEST_NEWS_CACHE_TTL_MS)
+      },
+      { upsert: true, new: true }
+    );
 
     return { items };
   }
@@ -354,10 +369,18 @@ export async function fetchLatestNews(topic: string): Promise<LatestNewsResult> 
       .filter((item) => item.link)
       .sort((left, right) => parseNewsDate(right.publishedAt) - parseNewsDate(left.publishedAt));
 
-    latestNewsCache.set(cacheKey, {
-      items,
-      expiresAt: Date.now() + LATEST_NEWS_CACHE_TTL_MS
-    });
+    await LatestNewsCacheModel.findOneAndUpdate(
+      { cache_key: cacheKey },
+      {
+        cache_key: cacheKey,
+        topic,
+        start_date: startDate,
+        end_date: endDate,
+        items,
+        expires_at: new Date(Date.now() + LATEST_NEWS_CACHE_TTL_MS)
+      },
+      { upsert: true, new: true }
+    );
 
     return {
       items

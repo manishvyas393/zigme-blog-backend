@@ -25,7 +25,13 @@ interface LatestNewsBody {
 interface GenerateFromNewsBody {
   site?: string;
   prompt?: string;
-  selectedNews?: SelectedNews;
+  selectedNews?: SelectedNews | {
+    title?: string;
+    link?: string;
+    snippet?: string;
+    source_name?: string;
+    published_at?: string;
+  };
 }
 
 type BlogStatus = "draft" | "pending" | "approved" | "rejected";
@@ -68,6 +74,30 @@ function parseNonNegativeInteger(value: string | undefined, field: string): numb
   }
 
   return Number(value);
+}
+
+function serializeSelectedNews(selectedNews: SelectedNews) {
+  return {
+    title: selectedNews.title,
+    link: selectedNews.link,
+    snippet: selectedNews.snippet,
+    source_name: selectedNews.sourceName,
+    published_at: selectedNews.publishedAt
+  };
+}
+
+function normalizeSelectedNewsInput(value: GenerateFromNewsBody["selectedNews"]): SelectedNews | null {
+  if (!value) {
+    return null;
+  }
+
+  return {
+    title: value.title || "",
+    link: value.link || "",
+    snippet: value.snippet || "",
+    sourceName: "sourceName" in value ? (value.sourceName || "") : (value.source_name || ""),
+    publishedAt: "publishedAt" in value ? (value.publishedAt || "") : (value.published_at || "")
+  };
 }
 
 export const blogRouter = express.Router();
@@ -143,7 +173,9 @@ blogRouter.post(
       }
 
       const news = await getLatestNews({ site, topic });
-      return res.json(news);
+      return res.json({
+        items: news.items.map(serializeSelectedNews)
+      });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown error";
       return res.status(500).json({ message });
@@ -155,7 +187,8 @@ blogRouter.post(
   "/generate-from-news",
   async (req: Request<Record<string, never>, unknown, GenerateFromNewsBody>, res: Response) => {
     try {
-      const { site, prompt, selectedNews } = req.body;
+      const { site, prompt } = req.body;
+      const selectedNews = normalizeSelectedNewsInput(req.body.selectedNews);
 
       if (!site || !selectedNews?.title || !selectedNews?.link) {
         return res.status(400).json({ message: "Site and selected news are required." });
@@ -180,7 +213,7 @@ blogRouter.post("/:id/send-for-approval", async (req: Request<{ id: string }>, r
     const result = await sendForApproval(req.params.id);
     return res.json({
       blog: serializeBlog(result.blog),
-      mailResult: result.mailResult
+      mail_result: result.mailResult
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";
@@ -220,9 +253,9 @@ blogRouter.post(
     try {
       const result = await rejectAndRegenerateByToken(req.params.reviewToken);
       return res.json({
-        rejectedBlog: serializeBlog(result.rejectedBlog),
-        regeneratedBlog: serializeBlog(result.regeneratedBlog),
-        mailResult: result.mailResult
+        rejected_blog: serializeBlog(result.rejectedBlog),
+        regenerated_blog: serializeBlog(result.regeneratedBlog),
+        mail_result: result.mailResult
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown error";

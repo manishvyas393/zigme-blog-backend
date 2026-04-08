@@ -45,20 +45,20 @@ GET /api/blogs?filter[approved]=true&filter[status]=approved&page=0&limit=25
       "prompt": "string",
       "title": "string",
       "summary": "string",
-      "htmlContent": "string",
+      "html_content": "string",
       "status": "pending",
-      "approvedFlag": false,
-      "rejectedFlag": false,
-      "selectedNews": null,
-      "sourceResults": [
+      "approved_flag": false,
+      "rejected_flag": false,
+      "selected_news": null,
+      "source_results": [
         {
           "title": "string",
           "link": "string",
           "snippet": "string"
         }
       ],
-      "createdAt": "2026-04-08T10:00:00.000Z",
-      "updatedAt": "2026-04-08T10:00:00.000Z"
+      "created_at": "2026-04-08T10:00:00.000Z",
+      "updated_at": "2026-04-08T10:00:00.000Z"
     }
   ],
   "total": 1,

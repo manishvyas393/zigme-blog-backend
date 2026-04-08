@@ -37,14 +37,14 @@ interface PublicBlogListItem {
   prompt: string;
   title: string;
   summary: string;
-  htmlContent: string;
+  html_content: string;
   status: BlogListStatus;
-  approvedFlag: boolean;
-  rejectedFlag: boolean;
-  selectedNews: SelectedNews | null;
-  sourceResults: SearchResult[];
-  createdAt: Date;
-  updatedAt: Date;
+  approved_flag: boolean;
+  rejected_flag: boolean;
+  selected_news: StoredSelectedNews | null;
+  source_results: SearchResult[];
+  created_at: Date;
+  updated_at: Date;
 }
 
 interface BlogListResult {
@@ -57,23 +57,23 @@ interface BlogListResult {
 
 interface PublicBlog {
   _id: string;
-  blogGroupId: string;
+  blog_group_id: string;
   revision: number;
   site: BlogVersion["site"];
   prompt: string;
-  searchQuery: string;
+  search_query: string;
   title: string;
   summary: string;
-  htmlContent: string;
+  html_content: string;
   status: BlogVersion["status"];
-  approvedFlag: boolean;
-  rejectedFlag: boolean;
-  reviewToken: string;
-  selectedNews: SelectedNews | null;
-  sourceResults: SearchResult[];
-  generationNotes: string;
-  createdAt: Date;
-  updatedAt: Date;
+  approved_flag: boolean;
+  rejected_flag: boolean;
+  review_token: string;
+  selected_news: StoredSelectedNews | null;
+  source_results: SearchResult[];
+  generation_notes: string;
+  created_at: Date;
+  updated_at: Date;
 }
 
 function sanitizeSelectedNews(selectedNews: SelectedNews | null | undefined): SelectedNews | null {
@@ -126,23 +126,23 @@ function fromStoredSelectedNews(selectedNews: StoredSelectedNews | null | undefi
 export function serializeBlog(blog: BlogVersionDocument): PublicBlog {
   return {
     _id: String(blog._id),
-    blogGroupId: blog.blog_group_id,
+    blog_group_id: blog.blog_group_id,
     revision: blog.revision,
     site: blog.site,
     prompt: blog.prompt,
-    searchQuery: blog.search_query,
+    search_query: blog.search_query,
     title: blog.title,
     summary: blog.summary,
-    htmlContent: blog.html_content,
+    html_content: blog.html_content,
     status: blog.status,
-    approvedFlag: blog.approved_flag,
-    rejectedFlag: blog.rejected_flag,
-    reviewToken: blog.review_token,
-    selectedNews: fromStoredSelectedNews(blog.selected_news),
-    sourceResults: blog.source_results,
-    generationNotes: blog.generation_notes,
-    createdAt: blog.created_at,
-    updatedAt: blog.updated_at
+    approved_flag: blog.approved_flag,
+    rejected_flag: blog.rejected_flag,
+    review_token: blog.review_token,
+    selected_news: blog.selected_news,
+    source_results: blog.source_results,
+    generation_notes: blog.generation_notes,
+    created_at: blog.created_at,
+    updated_at: blog.updated_at
   };
 }
 
@@ -349,14 +349,14 @@ export async function getBlogs(
     prompt: item.prompt,
     title: item.title,
     summary: item.summary,
-    htmlContent: item.html_content,
+    html_content: item.html_content,
     status: normalizeBlogListStatus(item.status),
-    approvedFlag: item.approved_flag,
-    rejectedFlag: item.rejected_flag,
-    selectedNews: fromStoredSelectedNews(item.selected_news),
-    sourceResults: item.source_results,
-    createdAt: item.created_at,
-    updatedAt: item.updated_at
+    approved_flag: item.approved_flag,
+    rejected_flag: item.rejected_flag,
+    selected_news: item.selected_news,
+    source_results: item.source_results,
+    created_at: item.created_at,
+    updated_at: item.updated_at
   }));
 
   return {

@@ -39,6 +39,10 @@ type BlogStatus = "draft" | "pending" | "approved" | "rejected";
 interface BlogListQuery {
   "filter[status]"?: string;
   "filter[platform]"?: string;
+  filter?: {
+    status?: string;
+    platform?: string;
+  };
   page?: string;
   pageNo?: string;
   limit?: string;
@@ -89,8 +93,8 @@ blogRouter.get(
   "/",
   async (req: Request<Record<string, never>, unknown, unknown, BlogListQuery>, res: Response) => {
     try {
-      const status = req.query["filter[status]"];
-      const platform = req.query["filter[platform]"];
+      const status = req.query["filter[status]"] ?? req.query.filter?.status;
+      const platform = req.query["filter[platform]"] ?? req.query.filter?.platform;
       const page = parseNonNegativeInteger(req.query.page, "page");
       const pageNo = parseNonNegativeInteger(req.query.pageNo, "pageNo");
       const limit = parseNonNegativeInteger(req.query.limit, "limit") ?? 25;

@@ -174,6 +174,15 @@ function parseJsonText<T>(value: string): T {
   return JSON.parse(value) as T;
 }
 
+function parseNewsDate(value: string | undefined): number {
+  if (!value) {
+    return 0;
+  }
+
+  const parsed = Date.parse(value);
+  return Number.isNaN(parsed) ? 0 : parsed;
+}
+
 export async function generateBlog({
   site,
   prompt
@@ -288,6 +297,7 @@ export async function fetchLatestNews(topic: string): Promise<LatestNewsResult> 
         link: normalizeUrl(item.link)
       }))
       .filter((item) => item.link)
+      .sort((left, right) => parseNewsDate(right.publishedAt) - parseNewsDate(left.publishedAt))
   };
 }
 

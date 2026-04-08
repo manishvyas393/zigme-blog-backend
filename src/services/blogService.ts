@@ -324,12 +324,16 @@ export async function getBlogs(
 
   const page = pagination.limit > 0 ? Math.floor(pagination.skip / pagination.limit) : 0;
   const pages = pagination.limit > 0 ? Math.ceil(total / pagination.limit) : 0;
-  const normalizeBlogListStatus = (status: BlogVersion["status"]): BlogListStatus => {
-    if (status === "approved" || status === "rejected") {
-      return status;
+  const responseStatusForFilter = (status: BlogVersion["status"]): BlogListStatus => {
+    if (status === "draft") {
+      return "pending";
     }
 
-    return "pending";
+    if (status === "pending_approval") {
+      return "pending";
+    }
+
+    return status;
   };
 
   const data = items.map((item) => ({
@@ -339,7 +343,13 @@ export async function getBlogs(
     title: item.title,
     summary: item.summary,
     html_content: item.html_content,
-    status: normalizeBlogListStatus(item.status),
+    status: (
+      filters.status === "draft"
+        ? "draft"
+        : filters.status === "pending_approval"
+          ? "pending"
+          : responseStatusForFilter(item.status)
+    ) as BlogListStatus,
     created_at: item.created_at,
     updated_at: item.updated_at
   }));

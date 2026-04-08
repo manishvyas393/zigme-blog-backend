@@ -33,6 +33,10 @@ interface BlogListQuery {
   "filter[approved]"?: string;
   "filter[rejected]"?: string;
   "filter[status]"?: string;
+  page?: string;
+  pageNo?: string;
+  limit?: string;
+  skip?: string;
 }
 
 const validStatuses: BlogStatus[] = ["draft", "pending_approval", "approved", "rejected"];
@@ -53,6 +57,18 @@ function parseBooleanFilter(value: string | undefined): boolean | undefined {
   throw new Error("Boolean filters must be 'true' or 'false'.");
 }
 
+function parseNonNegativeInteger(value: string | undefined, field: string): number | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (!/^\d+$/.test(value)) {
+    throw new Error(`${field} must be a non-negative integer.`);
+  }
+
+  return Number(value);
+}
+
 export const blogRouter = express.Router();
 
 blogRouter.get(
@@ -62,6 +78,12 @@ blogRouter.get(
       const approved = parseBooleanFilter(req.query["filter[approved]"]);
       const rejected = parseBooleanFilter(req.query["filter[rejected]"]);
       const status = req.query["filter[status]"];
+      const page = parseNonNegativeInteger(req.query.page, "page");
+      const pageNo = parseNonNegativeInteger(req.query.pageNo, "pageNo");
+      const limit = parseNonNegativeInteger(req.query.limit, "limit") ?? 25;
+      const skip =
+        parseNonNegativeInteger(req.query.skip, "skip") ??
+        ((pageNo ?? page ?? 0) * limit);
 
       if (status && !validStatuses.includes(status as BlogStatus)) {
         return res.status(400).json({
@@ -73,6 +95,9 @@ blogRouter.get(
         approved,
         rejected,
         status: status as BlogStatus | undefined
+      }, {
+        skip,
+        limit
       });
 
       return res.json(blogs);

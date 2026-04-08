@@ -22,6 +22,19 @@ interface BlogFilters {
   status?: BlogVersion["status"];
 }
 
+interface BlogPagination {
+  skip: number;
+  limit: number;
+}
+
+interface BlogListResult {
+  data: BlogVersionDocument[];
+  total: number;
+  page: number;
+  pages: number;
+  limit: number;
+}
+
 function sanitizeSelectedNews(selectedNews: SelectedNews | null | undefined): SelectedNews | null {
   if (!selectedNews) {
     return null;
@@ -200,7 +213,10 @@ export async function getBlogByReviewToken(reviewToken: string): Promise<BlogVer
   return blog;
 }
 
-export async function getBlogs(filters: BlogFilters = {}): Promise<BlogVersionDocument[]> {
+export async function getBlogs(
+  filters: BlogFilters = {},
+  pagination: BlogPagination = { skip: 0, limit: 25 }
+): Promise<BlogListResult> {
   const query: Partial<
     Pick<BlogVersion, "approvedFlag" | "rejectedFlag" | "status">
   > = {};
@@ -217,5 +233,20 @@ export async function getBlogs(filters: BlogFilters = {}): Promise<BlogVersionDo
     query.status = filters.status;
   }
 
-  return BlogVersionModel.find(query).sort({ createdAt: -1, revision: -1 });
+  const total = await BlogVersionModel.countDocuments(query);
+  const items = await BlogVersionModel.find(query)
+    .sort({ createdAt: -1, revision: -1 })
+    .skip(pagination.skip)
+    .limit(pagination.limit);
+
+  const page = pagination.limit > 0 ? Math.floor(pagination.skip / pagination.limit) : 0;
+  const pages = pagination.limit > 0 ? Math.ceil(total / pagination.limit) : 0;
+
+  return {
+    data: items,
+    total,
+    page,
+    pages,
+    limit: pagination.limit
+  };
 }

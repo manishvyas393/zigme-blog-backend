@@ -1,5 +1,6 @@
 import {
   BlogVersionModel,
+  type BlogVersion,
   type BlogVersionDocument,
   type SelectedNews
 } from "../models/blogVersion.js";
@@ -13,6 +14,12 @@ interface CreateVersionInput {
   site: string;
   prompt: string;
   selectedNews?: SelectedNews | null;
+}
+
+interface BlogFilters {
+  approved?: boolean;
+  rejected?: boolean;
+  status?: BlogVersion["status"];
 }
 
 function sanitizeSelectedNews(selectedNews: SelectedNews | null | undefined): SelectedNews | null {
@@ -191,4 +198,24 @@ export async function getBlogByReviewToken(reviewToken: string): Promise<BlogVer
   }
 
   return blog;
+}
+
+export async function getBlogs(filters: BlogFilters = {}): Promise<BlogVersionDocument[]> {
+  const query: Partial<
+    Pick<BlogVersion, "approvedFlag" | "rejectedFlag" | "status">
+  > = {};
+
+  if (typeof filters.approved === "boolean") {
+    query.approvedFlag = filters.approved;
+  }
+
+  if (typeof filters.rejected === "boolean") {
+    query.rejectedFlag = filters.rejected;
+  }
+
+  if (filters.status) {
+    query.status = filters.status;
+  }
+
+  return BlogVersionModel.find(query).sort({ createdAt: -1, revision: -1 });
 }

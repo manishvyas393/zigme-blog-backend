@@ -3,6 +3,7 @@ import {
   approveByToken,
   generateDraft,
   generateDraftFromNews,
+  getBlogs,
   getLatestNews,
   getBlogByReviewToken,
   rejectAndRegenerateByToken,
@@ -26,7 +27,61 @@ interface GenerateFromNewsBody {
   selectedNews?: SelectedNews;
 }
 
+type BlogStatus = "draft" | "pending_approval" | "approved" | "rejected";
+
+interface BlogListQuery {
+  "filter[approved]"?: string;
+  "filter[rejected]"?: string;
+  "filter[status]"?: string;
+}
+
+const validStatuses: BlogStatus[] = ["draft", "pending_approval", "approved", "rejected"];
+
+function parseBooleanFilter(value: string | undefined): boolean | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (value === "true") {
+    return true;
+  }
+
+  if (value === "false") {
+    return false;
+  }
+
+  throw new Error("Boolean filters must be 'true' or 'false'.");
+}
+
 export const blogRouter = express.Router();
+
+blogRouter.get(
+  "/",
+  async (req: Request<Record<string, never>, unknown, unknown, BlogListQuery>, res: Response) => {
+    try {
+      const approved = parseBooleanFilter(req.query["filter[approved]"]);
+      const rejected = parseBooleanFilter(req.query["filter[rejected]"]);
+      const status = req.query["filter[status]"];
+
+      if (status && !validStatuses.includes(status as BlogStatus)) {
+        return res.status(400).json({
+          message: "Status must be one of: draft, pending_approval, approved, rejected."
+        });
+      }
+
+      const blogs = await getBlogs({
+        approved,
+        rejected,
+        status: status as BlogStatus | undefined
+      });
+
+      return res.json(blogs);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown error";
+      return res.status(400).json({ message });
+    }
+  }
+);
 
 blogRouter.post(
   "/generate",
@@ -138,4 +193,3 @@ blogRouter.post(
     }
   }
 );
-

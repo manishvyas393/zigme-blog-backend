@@ -13,6 +13,7 @@ for (const key of required) {
 export interface AppConfig {
   port: number;
   clientUrl: string;
+  clientUrls: string[];
   mongodbUri: string;
   dnsServers: string[];
   openAiApiKey: string;
@@ -22,9 +23,15 @@ export interface AppConfig {
   approvalEmail: string;
 }
 
+const clientUrls = (process.env.CLIENT_URL || "http://localhost:5173")
+  .split(",")
+  .map((value) => value.trim().replace(/\/+$/, ""))
+  .filter(Boolean);
+
 export const config: AppConfig = {
   port: Number(process.env.PORT || 4000),
-  clientUrl: process.env.CLIENT_URL || "http://localhost:5173",
+  clientUrl: clientUrls[0] || "http://localhost:5173",
+  clientUrls,
   mongodbUri: process.env.MONGODB_URI as string,
   dnsServers: (process.env.DNS_SERVERS || "8.8.8.8,1.1.1.1")
     .split(",")
@@ -36,4 +43,3 @@ export const config: AppConfig = {
   mailFrom: process.env.MAIL_FROM || "no-reply@zigme.in",
   approvalEmail: process.env.APPROVAL_EMAIL || "manish@zigme.in"
 };
-

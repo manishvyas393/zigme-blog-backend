@@ -8,7 +8,21 @@ const app = express();
 
 app.use(
   cors({
-    origin: config.clientUrl
+    origin(origin, callback) {
+      if (!origin) {
+        callback(null, true);
+        return;
+      }
+
+      const normalizedOrigin = origin.replace(/\/+$/, "");
+
+      if (config.clientUrls.includes(normalizedOrigin)) {
+        callback(null, true);
+        return;
+      }
+
+      callback(new Error(`CORS blocked for origin: ${origin}`));
+    }
   })
 );
 app.use(express.json({ limit: "1mb" }));
@@ -29,4 +43,3 @@ connectDb()
     console.error("Failed to start server", error);
     process.exit(1);
   });
-

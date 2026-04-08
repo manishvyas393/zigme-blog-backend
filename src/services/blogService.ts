@@ -143,11 +143,7 @@ export function serializeBlog(blog: BlogVersionDocument): PublicBlog {
 }
 
 function defaultNewsTopicForSite(site: string): string {
-  if (site === "talent.zigme.in") {
-    return "latest news about talent acquisition, workforce trends, skills, and careers";
-  }
-
-  return "latest news about hiring, recruitment, HR technology, and employer branding";
+  return "latest news about any topic";
 }
 
 async function createVersion({

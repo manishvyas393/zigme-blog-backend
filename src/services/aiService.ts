@@ -52,7 +52,7 @@ function normalizeUrl(value: unknown): string {
 function getRecentNewsWindow(): { startDate: string; endDate: string } {
   const endDate = new Date();
   const startDate = new Date();
-  startDate.setDate(endDate.getDate() - 2);
+  startDate.setDate(endDate.getDate() - 5);
 
   const toDateString = (value: Date): string => value.toISOString().slice(0, 10);
 
@@ -90,7 +90,7 @@ function buildNewsPrompt(topic: string): string {
   return `Search the web for the 5 latest important news items about: ${topic}
 
 Instructions:
-- Focus on recent news and current developments.
+- Focus on recent news and current developments from any topic.
 - Only use news published between ${startDate} and ${endDate}.
 - Prefer reputable publications.
 - Return exactly 5 items when possible.

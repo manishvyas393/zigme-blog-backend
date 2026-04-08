@@ -51,6 +51,18 @@ interface BlogListQuery {
 
 const validStatuses: BlogStatus[] = ["draft", "pending", "approved", "rejected"];
 
+function getResponseStatus(error: unknown, fallback: number): number {
+  if (typeof error === "object" && error !== null) {
+    const statusCode = (error as { statusCode?: number }).statusCode;
+
+    if (typeof statusCode === "number") {
+      return statusCode;
+    }
+  }
+
+  return fallback;
+}
+
 function parseNonNegativeInteger(value: string | undefined, field: string): number | undefined {
   if (value === undefined) {
     return undefined;
@@ -157,7 +169,7 @@ blogRouter.post(
       return res.status(201).json(serializeBlog(blog));
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown error";
-      return res.status(500).json({ message });
+      return res.status(getResponseStatus(error, 500)).json({ message });
     }
   }
 );
@@ -178,7 +190,7 @@ blogRouter.post(
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown error";
-      return res.status(500).json({ message });
+      return res.status(getResponseStatus(error, 500)).json({ message });
     }
   }
 );
@@ -203,7 +215,7 @@ blogRouter.post(
       return res.status(201).json(serializeBlog(blog));
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown error";
-      return res.status(500).json({ message });
+      return res.status(getResponseStatus(error, 500)).json({ message });
     }
   }
 );
@@ -217,7 +229,7 @@ blogRouter.post("/:id/send-for-approval", async (req: Request<{ id: string }>, r
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";
-    return res.status(500).json({ message });
+    return res.status(getResponseStatus(error, 500)).json({ message });
   }
 });
 

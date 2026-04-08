@@ -6,6 +6,16 @@ const openai = config.openAiApiKey ? new OpenAI({ apiKey: config.openAiApiKey })
 const latestNewsCache = new Map<string, { expiresAt: number; items: SelectedNews[] }>();
 const LATEST_NEWS_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 
+class ExternalServiceError extends Error {
+  statusCode: number;
+
+  constructor(message: string, statusCode: number) {
+    super(message);
+    this.name = "ExternalServiceError";
+    this.statusCode = statusCode;
+  }
+}
+
 interface BlogGenerationResult {
   title: string;
   summary: string;
@@ -191,6 +201,25 @@ function parseNewsDate(value: string | undefined): number {
   return Number.isNaN(parsed) ? 0 : parsed;
 }
 
+function isOpenAIQuotaError(error: unknown): boolean {
+  const status = typeof error === "object" && error !== null ? (error as { status?: number }).status : undefined;
+  const message = error instanceof Error ? error.message : String(error || "");
+
+  return status === 429 || /exceeded your current quota|insufficient_quota|usage limit/i.test(message);
+}
+
+function toFriendlyOpenAIError(error: unknown): ExternalServiceError {
+  if (isOpenAIQuotaError(error)) {
+    return new ExternalServiceError(
+      "OpenAI quota reached. Please check your OpenAI billing or usage limits, then try again.",
+      429
+    );
+  }
+
+  const message = error instanceof Error ? error.message : "OpenAI request failed.";
+  return new ExternalServiceError(message, 502);
+}
+
 export async function generateBlog({
   site,
   prompt
@@ -215,36 +244,40 @@ export async function generateBlog({
     };
   }
 
-  const response = (await openai.responses.create({
-    model: config.blogModel,
-    include: ["web_search_call.action.sources"] as any,
-    tools: [{ type: "web_search" }],
-    input: buildResearchPrompt(site, prompt),
-    text: {
-      format: {
-        type: "json_schema",
-        name: "blog_generation",
-        schema: {
-          type: "object",
-          additionalProperties: false,
-          properties: {
-            title: { type: "string" },
-            summary: { type: "string" },
-            htmlContent: { type: "string" },
-            generationNotes: { type: "string" }
-          },
-          required: ["title", "summary", "htmlContent", "generationNotes"]
+  try {
+    const response = (await openai.responses.create({
+      model: config.blogModel,
+      include: ["web_search_call.action.sources"] as any,
+      tools: [{ type: "web_search" }],
+      input: buildResearchPrompt(site, prompt),
+      text: {
+        format: {
+          type: "json_schema",
+          name: "blog_generation",
+          schema: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              title: { type: "string" },
+              summary: { type: "string" },
+              htmlContent: { type: "string" },
+              generationNotes: { type: "string" }
+            },
+            required: ["title", "summary", "htmlContent", "generationNotes"]
+          }
         }
       }
-    }
-  } as any)) as AIServiceResponse;
+    } as any)) as AIServiceResponse;
 
-  const parsed = parseJsonText<Omit<BlogGenerationResult, "sourceResults">>(response.output_text);
+    const parsed = parseJsonText<Omit<BlogGenerationResult, "sourceResults">>(response.output_text);
 
-  return {
-    ...parsed,
-    sourceResults: extractSources(response)
-  };
+    return {
+      ...parsed,
+      sourceResults: extractSources(response)
+    };
+  } catch (error) {
+    throw toFriendlyOpenAIError(error);
+  }
 }
 
 export async function fetchLatestNews(topic: string): Promise<LatestNewsResult> {
@@ -275,59 +308,63 @@ export async function fetchLatestNews(topic: string): Promise<LatestNewsResult> 
     return { items };
   }
 
-  const response = (await openai.responses.create({
-    model: config.newsModel,
-    include: ["web_search_call.action.sources"] as any,
-    tools: [{ type: "web_search" }],
-    input: buildNewsPrompt(topic),
-    text: {
-      format: {
-        type: "json_schema",
-        name: "latest_news",
-        schema: {
-          type: "object",
-          additionalProperties: false,
-          properties: {
-            items: {
-              type: "array",
+  try {
+    const response = (await openai.responses.create({
+      model: config.newsModel,
+      include: ["web_search_call.action.sources"] as any,
+      tools: [{ type: "web_search" }],
+      input: buildNewsPrompt(topic),
+      text: {
+        format: {
+          type: "json_schema",
+          name: "latest_news",
+          schema: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
               items: {
-                type: "object",
-                additionalProperties: false,
-                properties: {
-                  title: { type: "string" },
-                  link: { type: "string" },
-                  snippet: { type: "string" },
-                  sourceName: { type: "string" },
-                  publishedAt: { type: "string" }
-                },
-                required: ["title", "link", "snippet", "sourceName", "publishedAt"]
+                type: "array",
+                items: {
+                  type: "object",
+                  additionalProperties: false,
+                  properties: {
+                    title: { type: "string" },
+                    link: { type: "string" },
+                    snippet: { type: "string" },
+                    sourceName: { type: "string" },
+                    publishedAt: { type: "string" }
+                  },
+                  required: ["title", "link", "snippet", "sourceName", "publishedAt"]
+                }
               }
-            }
-          },
-          required: ["items"]
+            },
+            required: ["items"]
+          }
         }
       }
-    }
-  } as any)) as AIServiceResponse;
+    } as any)) as AIServiceResponse;
 
-  const parsed = parseJsonText<LatestNewsResult>(response.output_text);
-  const items = parsed.items
-    .slice(0, 10)
-    .map((item) => ({
-      ...item,
-      link: normalizeUrl(item.link)
-    }))
-    .filter((item) => item.link)
-    .sort((left, right) => parseNewsDate(right.publishedAt) - parseNewsDate(left.publishedAt));
+    const parsed = parseJsonText<LatestNewsResult>(response.output_text);
+    const items = parsed.items
+      .slice(0, 10)
+      .map((item) => ({
+        ...item,
+        link: normalizeUrl(item.link)
+      }))
+      .filter((item) => item.link)
+      .sort((left, right) => parseNewsDate(right.publishedAt) - parseNewsDate(left.publishedAt));
 
-  latestNewsCache.set(cacheKey, {
-    items,
-    expiresAt: Date.now() + LATEST_NEWS_CACHE_TTL_MS
-  });
+    latestNewsCache.set(cacheKey, {
+      items,
+      expiresAt: Date.now() + LATEST_NEWS_CACHE_TTL_MS
+    });
 
-  return {
-    items
-  };
+    return {
+      items
+    };
+  } catch (error) {
+    throw toFriendlyOpenAIError(error);
+  }
 }
 
 export async function generateBlogFromNews({
@@ -355,32 +392,36 @@ export async function generateBlogFromNews({
     };
   }
 
-  const response = (await openai.responses.create({
-    model: config.blogModel,
-    input: buildNewsBasedBlogPrompt(site, prompt, selectedNews),
-    text: {
-      format: {
-        type: "json_schema",
-        name: "blog_generation_from_news",
-        schema: {
-          type: "object",
-          additionalProperties: false,
-          properties: {
-            title: { type: "string" },
-            summary: { type: "string" },
-            htmlContent: { type: "string" },
-            generationNotes: { type: "string" }
-          },
-          required: ["title", "summary", "htmlContent", "generationNotes"]
+  try {
+    const response = (await openai.responses.create({
+      model: config.blogModel,
+      input: buildNewsBasedBlogPrompt(site, prompt, selectedNews),
+      text: {
+        format: {
+          type: "json_schema",
+          name: "blog_generation_from_news",
+          schema: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              title: { type: "string" },
+              summary: { type: "string" },
+              htmlContent: { type: "string" },
+              generationNotes: { type: "string" }
+            },
+            required: ["title", "summary", "htmlContent", "generationNotes"]
+          }
         }
       }
-    }
-  } as any)) as AIServiceResponse;
+    } as any)) as AIServiceResponse;
 
-  const parsed = parseJsonText<Omit<BlogGenerationResult, "sourceResults">>(response.output_text);
+    const parsed = parseJsonText<Omit<BlogGenerationResult, "sourceResults">>(response.output_text);
 
-  return {
-    ...parsed,
-    sourceResults: []
-  };
+    return {
+      ...parsed,
+      sourceResults: []
+    };
+  } catch (error) {
+    throw toFriendlyOpenAIError(error);
+  }
 }

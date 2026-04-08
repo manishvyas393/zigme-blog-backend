@@ -12,8 +12,6 @@ All query parameters are optional.
 
 | Name | Type | Default | Allowed Values |
 | --- | --- | --- | --- |
-| `filter[approved]` | boolean string | none | `true`, `false` |
-| `filter[rejected]` | boolean string | none | `true`, `false` |
 | `filter[status]` | string | none | `draft`, `pending`, `approved`, `rejected` |
 | `page` | number | `0` | any non-negative integer |
 | `pageNo` | number | `0` | any non-negative integer |
@@ -24,12 +22,11 @@ All query parameters are optional.
 
 - `page` and `pageNo` are treated as the same paging input.
 - If `skip` is not provided, it is calculated as `(pageNo ?? page ?? 0) * limit`.
-- `filter[approved]` and `filter[rejected]` must be passed as the strings `true` or `false`.
 
 ### Example Request
 
 ```http
-GET /api/blogs?filter[approved]=true&filter[status]=approved&page=0&limit=25
+GET /api/blogs?filter[status]=approved&page=0&limit=25
 ```
 
 ## API Response Structure
@@ -47,8 +44,6 @@ GET /api/blogs?filter[approved]=true&filter[status]=approved&page=0&limit=25
       "summary": "string",
       "html_content": "string",
       "status": "pending",
-      "approved_flag": false,
-      "rejected_flag": false,
       "selected_news": null,
       "source_results": [
         {

@@ -37,8 +37,6 @@ interface GenerateFromNewsBody {
 type BlogStatus = "draft" | "pending" | "approved" | "rejected";
 
 interface BlogListQuery {
-  "filter[approved]"?: string;
-  "filter[rejected]"?: string;
   "filter[status]"?: string;
   page?: string;
   pageNo?: string;
@@ -49,19 +47,7 @@ interface BlogListQuery {
 const validStatuses: BlogStatus[] = ["draft", "pending", "approved", "rejected"];
 
 function parseBooleanFilter(value: string | undefined): boolean | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-
-  if (value === "true") {
-    return true;
-  }
-
-  if (value === "false") {
-    return false;
-  }
-
-  throw new Error("Boolean filters must be 'true' or 'false'.");
+  return value === undefined ? undefined : undefined;
 }
 
 function parseNonNegativeInteger(value: string | undefined, field: string): number | undefined {
@@ -106,8 +92,6 @@ blogRouter.get(
   "/",
   async (req: Request<Record<string, never>, unknown, unknown, BlogListQuery>, res: Response) => {
     try {
-      const approved = parseBooleanFilter(req.query["filter[approved]"]);
-      const rejected = parseBooleanFilter(req.query["filter[rejected]"]);
       const status = req.query["filter[status]"];
       const page = parseNonNegativeInteger(req.query.page, "page");
       const pageNo = parseNonNegativeInteger(req.query.pageNo, "pageNo");
@@ -123,8 +107,6 @@ blogRouter.get(
       }
 
       const blogs = await getBlogs({
-        approved,
-        rejected,
         status: status === "pending" ? "pending_approval" : (status as
           | "draft"
           | "approved"

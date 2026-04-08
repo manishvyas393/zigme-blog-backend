@@ -19,8 +19,6 @@ interface CreateVersionInput {
 }
 
 interface BlogFilters {
-  approved?: boolean;
-  rejected?: boolean;
   status?: BlogVersion["status"];
 }
 
@@ -39,8 +37,6 @@ interface PublicBlogListItem {
   summary: string;
   html_content: string;
   status: BlogListStatus;
-  approved_flag: boolean;
-  rejected_flag: boolean;
   selected_news: StoredSelectedNews | null;
   source_results: SearchResult[];
   created_at: Date;
@@ -311,17 +307,7 @@ export async function getBlogs(
   filters: BlogFilters = {},
   pagination: BlogPagination = { skip: 0, limit: 25 }
 ): Promise<BlogListResult> {
-  const query: Partial<
-    Pick<BlogVersion, "approved_flag" | "rejected_flag" | "status">
-  > = {};
-
-  if (typeof filters.approved === "boolean") {
-    query.approved_flag = filters.approved;
-  }
-
-  if (typeof filters.rejected === "boolean") {
-    query.rejected_flag = filters.rejected;
-  }
+  const query: Partial<Pick<BlogVersion, "status">> = {};
 
   if (filters.status) {
     query.status = filters.status;
@@ -351,8 +337,6 @@ export async function getBlogs(
     summary: item.summary,
     html_content: item.html_content,
     status: normalizeBlogListStatus(item.status),
-    approved_flag: item.approved_flag,
-    rejected_flag: item.rejected_flag,
     selected_news: item.selected_news,
     source_results: item.source_results,
     created_at: item.created_at,

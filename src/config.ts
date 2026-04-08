@@ -17,6 +17,7 @@ export interface AppConfig {
   mongodbUri: string;
   dnsServers: string[];
   openAiApiKey: string;
+  newsModel: string;
   blogModel: string;
   postmarkServerToken: string;
   mailFrom: string;
@@ -38,6 +39,7 @@ export const config: AppConfig = {
     .map((value) => value.trim())
     .filter(Boolean),
   openAiApiKey: process.env.OPENAI_API_KEY || "",
+  newsModel: process.env.NEWS_MODEL || "gpt-4.1-mini",
   blogModel: process.env.BLOG_MODEL || "gpt-4.1",
   postmarkServerToken: process.env.POSTMARK_SERVER_TOKEN || "",
   mailFrom: process.env.MAIL_FROM || "no-reply@zigme.in",

@@ -3,6 +3,8 @@ import { config } from "../config.js";
 import type { SearchResult, SelectedNews } from "../models/blogVersion.js";
 
 const openai = config.openAiApiKey ? new OpenAI({ apiKey: config.openAiApiKey }) : null;
+const latestNewsCache = new Map<string, { expiresAt: number; items: SelectedNews[] }>();
+const LATEST_NEWS_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 
 interface BlogGenerationResult {
   title: string;
@@ -68,6 +70,9 @@ Topic prompt: ${prompt}
 
 Instructions:
 - Search the web first and use the findings to ground the blog.
+- Keep the article concise and practical.
+- Use a short intro, 2-3 brief sections, and compact paragraphs.
+- Aim for roughly 400-600 words.
 - Prefer practical, business-safe, non-controversial guidance.
 - Avoid political, medical, legal, or sensational claims.
 - Do not invent facts.
@@ -87,13 +92,13 @@ generationNotes`;
 function buildNewsPrompt(topic: string): string {
   const { startDate, endDate } = getRecentNewsWindow();
 
-  return `Search the web for the 5 latest important news items about: ${topic}
+  return `Search the web for the 10 latest important news items about: ${topic}
 
 Instructions:
 - Focus on recent news and current developments from any topic.
 - Only use news published between ${startDate} and ${endDate}.
 - Prefer reputable publications.
-- Return exactly 5 items when possible.
+- Return exactly 10 items when possible.
 - Keep each snippet short and factual.
 - Use ISO-style date strings when a publication date is available.
 - Exclude items older than ${startDate}.
@@ -125,7 +130,10 @@ Snippet: ${selectedNews.snippet || "No snippet provided"}
 
 Instructions:
 - Use the selected news item as the anchor for the article.
-- Search the web for supporting context before writing.
+- Do not browse the web. Use only the selected news item and the topic prompt.
+- Keep the article concise and practical.
+- Use a short intro, 2-3 brief sections, and compact paragraphs.
+- Aim for roughly 400-600 words.
 - Prefer practical, business-safe, non-controversial guidance.
 - Avoid political, medical, legal, or sensational claims.
 - Do not invent facts.
@@ -240,20 +248,35 @@ export async function generateBlog({
 }
 
 export async function fetchLatestNews(topic: string): Promise<LatestNewsResult> {
-  if (!openai) {
+  const { startDate, endDate } = getRecentNewsWindow();
+  const cacheKey = `${topic.trim().toLowerCase()}|${startDate}|${endDate}`;
+  const cached = latestNewsCache.get(cacheKey);
+
+  if (cached && cached.expiresAt > Date.now()) {
     return {
-      items: Array.from({ length: 5 }, (_, index) => ({
+      items: cached.items
+    };
+  }
+
+  if (!openai) {
+    const items = Array.from({ length: 10 }, (_, index) => ({
         title: `Placeholder latest news ${index + 1} for ${topic}`,
         link: "https://example.com/news-placeholder",
         snippet: "Configure OPENAI_API_KEY to fetch live latest news.",
         sourceName: "Placeholder",
         publishedAt: ""
-      }))
-    };
+      }));
+
+    latestNewsCache.set(cacheKey, {
+      items,
+      expiresAt: Date.now() + LATEST_NEWS_CACHE_TTL_MS
+    });
+
+    return { items };
   }
 
   const response = (await openai.responses.create({
-    model: config.blogModel,
+    model: config.newsModel,
     include: ["web_search_call.action.sources"] as any,
     tools: [{ type: "web_search" }],
     input: buildNewsPrompt(topic),
@@ -288,16 +311,22 @@ export async function fetchLatestNews(topic: string): Promise<LatestNewsResult> 
   } as any)) as AIServiceResponse;
 
   const parsed = parseJsonText<LatestNewsResult>(response.output_text);
+  const items = parsed.items
+    .slice(0, 10)
+    .map((item) => ({
+      ...item,
+      link: normalizeUrl(item.link)
+    }))
+    .filter((item) => item.link)
+    .sort((left, right) => parseNewsDate(right.publishedAt) - parseNewsDate(left.publishedAt));
+
+  latestNewsCache.set(cacheKey, {
+    items,
+    expiresAt: Date.now() + LATEST_NEWS_CACHE_TTL_MS
+  });
 
   return {
-    items: parsed.items
-      .slice(0, 5)
-      .map((item) => ({
-        ...item,
-        link: normalizeUrl(item.link)
-      }))
-      .filter((item) => item.link)
-      .sort((left, right) => parseNewsDate(right.publishedAt) - parseNewsDate(left.publishedAt))
+    items
   };
 }
 
@@ -328,8 +357,6 @@ export async function generateBlogFromNews({
 
   const response = (await openai.responses.create({
     model: config.blogModel,
-    include: ["web_search_call.action.sources"] as any,
-    tools: [{ type: "web_search" }],
     input: buildNewsBasedBlogPrompt(site, prompt, selectedNews),
     text: {
       format: {
@@ -354,6 +381,6 @@ export async function generateBlogFromNews({
 
   return {
     ...parsed,
-    sourceResults: extractSources(response)
+    sourceResults: []
   };
 }

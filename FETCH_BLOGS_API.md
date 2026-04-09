@@ -2,7 +2,7 @@
 
 ## API Endpoint
 
-`GET /api/blogs`
+`GET https://zigme-blog-backend.vercel.app/api/blogs`
 
 ## API Requirements
 
@@ -23,7 +23,7 @@ All query parameters are optional.
 
 - `page` and `pageNo` are treated as the same paging input.
 - If `skip` is not provided, it is calculated as `(pageNo ?? page ?? 0) * limit`.
-- Results are sorted by `updated_at` descending, then `created_at`, then `revision`.
+- Results are sorted by `updated_at` descending, then `created_at`,
 - `filter[platform]=talent` maps to `site = talent.zigme.in`.
 - `filter[platform]=hiring` maps to `site = hiring.zigme.in`.
 - Any other `filter[platform]` value leaves the list unfiltered by platform.

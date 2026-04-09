@@ -4,7 +4,7 @@ import { LatestNewsCacheModel } from "../models/latestNewsCache.js";
 import type { SearchResult, SelectedNews } from "../models/blogVersion.js";
 
 const openai = config.openAiApiKey ? new OpenAI({ apiKey: config.openAiApiKey }) : null;
-const LATEST_NEWS_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+const LATEST_NEWS_CACHE_TTL_MS = 3 * 60 * 60 * 1000;
 
 class ExternalServiceError extends Error {
   statusCode: number;
@@ -61,19 +61,6 @@ function normalizeUrl(value: unknown): string {
   return "";
 }
 
-function getRecentNewsWindow(): { startDate: string; endDate: string } {
-  const endDate = new Date();
-  const startDate = new Date();
-  startDate.setDate(endDate.getDate() - 5);
-
-  const toDateString = (value: Date): string => value.toISOString().slice(0, 10);
-
-  return {
-    startDate: toDateString(startDate),
-    endDate: toDateString(endDate)
-  };
-}
-
 function buildResearchPrompt(site: string, prompt: string): string {
   return `Research and write a professional, uncontroversial blog for ${site}.
 Topic prompt: ${prompt}
@@ -100,18 +87,20 @@ generationNotes`;
 }
 
 function buildNewsPrompt(topic: string): string {
-  const { startDate, endDate } = getRecentNewsWindow();
+  const today = new Date().toISOString().slice(0, 10);
 
-  return `Search the web for the 10 latest important news items about: ${topic}
+  return `Search the web for the 10 most recent important news items about: ${topic}
 
 Instructions:
-- Focus on recent news and current developments from any topic.
-- Only use news published between ${startDate} and ${endDate}.
+- Focus on the newest available news right now.
+- Prefer items published today or within the last 24 hours.
+- If there are not enough, include the next most recent items.
 - Prefer reputable publications.
-- Return exactly 10 items when possible.
+- Return exactly 10 items if possible.
 - Keep each snippet short and factual.
 - Use ISO-style date strings when a publication date is available.
-- Exclude items older than ${startDate}.
+- Do not return stale or evergreen results if fresher news is available.
+- Today's date is ${today}.
 
 Return JSON with exactly this shape:
 {
@@ -201,8 +190,8 @@ function parseNewsDate(value: string | undefined): number {
   return Number.isNaN(parsed) ? 0 : parsed;
 }
 
-function buildLatestNewsCacheKey(topic: string, startDate: string, endDate: string): string {
-  return `${topic.trim().toLowerCase()}|${startDate}|${endDate}`;
+function buildLatestNewsCacheKey(topic: string): string {
+  return topic.trim().toLowerCase();
 }
 
 function isOpenAIQuotaError(error: unknown): boolean {
@@ -285,8 +274,7 @@ export async function generateBlog({
 }
 
 export async function fetchLatestNews(topic: string): Promise<LatestNewsResult> {
-  const { startDate, endDate } = getRecentNewsWindow();
-  const cacheKey = buildLatestNewsCacheKey(topic, startDate, endDate);
+  const cacheKey = buildLatestNewsCacheKey(topic);
   const cached = await LatestNewsCacheModel.findOne({
     cache_key: cacheKey,
     expires_at: { $gt: new Date() }
@@ -312,8 +300,6 @@ export async function fetchLatestNews(topic: string): Promise<LatestNewsResult> 
       {
         cache_key: cacheKey,
         topic,
-        start_date: startDate,
-        end_date: endDate,
         items,
         expires_at: new Date(Date.now() + LATEST_NEWS_CACHE_TTL_MS)
       },
@@ -374,8 +360,6 @@ export async function fetchLatestNews(topic: string): Promise<LatestNewsResult> 
       {
         cache_key: cacheKey,
         topic,
-        start_date: startDate,
-        end_date: endDate,
         items,
         expires_at: new Date(Date.now() + LATEST_NEWS_CACHE_TTL_MS)
       },

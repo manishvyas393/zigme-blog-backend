@@ -136,6 +136,12 @@ export function serializeBlog(blog: BlogVersionDocument): PublicBlog {
 }
 
 function defaultNewsTopicForSite(site: string): string {
+  if (site.includes("talent.zigme.in")) {
+    return "campus drives, campus recruitment, fresher hiring, college placements, campus hiring news";
+  }
+  if (site.includes("hiring.zigme.in")) {
+    return "hiring strategies, recruitment trends, employer hiring, recruitment news, talent acquisition";
+  }
   return "latest news about any topic";
 }
 

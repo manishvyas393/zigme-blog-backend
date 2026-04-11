@@ -25,7 +25,8 @@ interface BlogGenerationResult {
 }
 
 interface LatestNewsResult {
-  items: SelectedNews[];
+  hiring: SelectedNews[];
+  talent: SelectedNews[];
 }
 
 interface AIServiceResponse {
@@ -86,17 +87,17 @@ htmlContent
 generationNotes`;
 }
 
-function buildNewsPrompt(topic: string): string {
+function buildNewsPrompt(topic: string, count: number = 5): string {
   const today = new Date().toISOString().slice(0, 10);
 
-  return `Search the web for the 10 most recent important news items about: ${topic}
+  return `Search the web for the ${count} most recent important news items about: ${topic}
 
 Instructions:
 - Focus on the newest available news right now.
 - Prefer items published today or within the last 24 hours.
 - If there are not enough, include the next most recent items.
 - Prefer reputable publications.
-- Return exactly 10 items if possible.
+- Return exactly ${count} items if possible.
 - Keep each snippet short and factual.
 - Use ISO-style date strings when a publication date is available.
 - Do not return stale or evergreen results if fresher news is available.
@@ -273,40 +274,15 @@ export async function generateBlog({
   }
 }
 
-export async function fetchLatestNews(topic: string): Promise<LatestNewsResult> {
-  const cacheKey = buildLatestNewsCacheKey(topic);
-  const cached = await LatestNewsCacheModel.findOne({
-    cache_key: cacheKey,
-    expires_at: { $gt: new Date() }
-  }).lean();
-
-  if (cached) {
-    return {
-      items: cached.items
-    };
-  }
-
+async function fetchNewsForTopic(topic: string, count: number = 5): Promise<SelectedNews[]> {
   if (!openai) {
-    const items = Array.from({ length: 10 }, (_, index) => ({
-        title: `Placeholder latest news ${index + 1} for ${topic}`,
-        link: "https://example.com/news-placeholder",
-        snippet: "Configure OPENAI_API_KEY to fetch live latest news.",
-        sourceName: "Placeholder",
-        publishedAt: ""
-      }));
-
-    await LatestNewsCacheModel.findOneAndUpdate(
-      { cache_key: cacheKey },
-      {
-        cache_key: cacheKey,
-        topic,
-        items,
-        expires_at: new Date(Date.now() + LATEST_NEWS_CACHE_TTL_MS)
-      },
-      { upsert: true, new: true }
-    );
-
-    return { items };
+    return Array.from({ length: count }, (_, index) => ({
+      title: `Placeholder latest news ${index + 1} for ${topic}`,
+      link: "https://example.com/news-placeholder",
+      snippet: "Configure OPENAI_API_KEY to fetch live latest news.",
+      sourceName: "Placeholder",
+      publishedAt: ""
+    }));
   }
 
   try {
@@ -314,7 +290,7 @@ export async function fetchLatestNews(topic: string): Promise<LatestNewsResult> 
       model: config.newsModel,
       include: ["web_search_call.action.sources"] as any,
       tools: [{ type: "web_search" }],
-      input: buildNewsPrompt(topic),
+      input: buildNewsPrompt(topic, count),
       text: {
         format: {
           type: "json_schema",
@@ -345,33 +321,59 @@ export async function fetchLatestNews(topic: string): Promise<LatestNewsResult> 
       }
     } as any)) as AIServiceResponse;
 
-    const parsed = parseJsonText<LatestNewsResult>(response.output_text);
-    const items = parsed.items
-      .slice(0, 10)
+    const parsed = parseJsonText<{ items: SelectedNews[] }>(response.output_text);
+    return parsed.items
+      .slice(0, count)
       .map((item) => ({
         ...item,
         link: normalizeUrl(item.link)
       }))
       .filter((item) => item.link)
       .sort((left, right) => parseNewsDate(right.publishedAt) - parseNewsDate(left.publishedAt));
-
-    await LatestNewsCacheModel.findOneAndUpdate(
-      { cache_key: cacheKey },
-      {
-        cache_key: cacheKey,
-        topic,
-        items,
-        expires_at: new Date(Date.now() + LATEST_NEWS_CACHE_TTL_MS)
-      },
-      { upsert: true, new: true }
-    );
-
-    return {
-      items
-    };
   } catch (error) {
     throw toFriendlyOpenAIError(error);
   }
+}
+
+export async function fetchLatestNews(topic: string): Promise<LatestNewsResult> {
+  const cacheKey = buildLatestNewsCacheKey(topic);
+  const cached = await LatestNewsCacheModel.findOne({
+    cache_key: cacheKey,
+    expires_at: { $gt: new Date() }
+  }).lean();
+
+  if (cached) {
+    return {
+      hiring: cached.items.slice(0, 5),
+      talent: cached.items.slice(5, 10)
+    };
+  }
+
+  const hiringTopic = "hiring strategies, recruitment trends, employer hiring, recruitment news, talent acquisition";
+  const talentTopic = "campus drives, campus recruitment, fresher hiring, college placements, campus hiring news";
+
+  const [hiringNews, talentNews] = await Promise.all([
+    fetchNewsForTopic(hiringTopic, 5),
+    fetchNewsForTopic(talentTopic, 5)
+  ]);
+
+  const allItems = [...hiringNews, ...talentNews];
+
+  await LatestNewsCacheModel.findOneAndUpdate(
+    { cache_key: cacheKey },
+    {
+      cache_key: cacheKey,
+      topic,
+      items: allItems,
+      expires_at: new Date(Date.now() + LATEST_NEWS_CACHE_TTL_MS)
+    },
+    { upsert: true, new: true }
+  );
+
+  return {
+    hiring: hiringNews,
+    talent: talentNews
+  };
 }
 
 export async function generateBlogFromNews({

@@ -186,7 +186,8 @@ blogRouter.post(
 
       const news = await getLatestNews({ site, topic });
       return res.json({
-        items: news.items.map(serializeSelectedNews)
+        hiring: news.hiring.map(serializeSelectedNews),
+        talent: news.talent.map(serializeSelectedNews)
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown error";

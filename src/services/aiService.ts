@@ -387,7 +387,9 @@ export async function fetchLatestNews(topic: string): Promise<LatestNewsResult> 
     fetchNewsForTopic(talentTopic, NEWS_FETCH_REQUEST_COUNT)
   ]);
 
-  const allItems = [...hiringNews, ...talentNews];
+  const cappedHiringNews = normalizeAndFilterRecentNews(hiringNews, NEWS_ITEMS_PER_SECTION);
+  const cappedTalentNews = normalizeAndFilterRecentNews(talentNews, NEWS_ITEMS_PER_SECTION);
+  const allItems = [...cappedHiringNews, ...cappedTalentNews];
 
   await LatestNewsCacheModel.findOneAndUpdate(
     { cache_key: cacheKey },
@@ -401,8 +403,8 @@ export async function fetchLatestNews(topic: string): Promise<LatestNewsResult> 
   );
 
   return {
-    hiring: hiringNews,
-    talent: talentNews
+    hiring: cappedHiringNews,
+    talent: cappedTalentNews
   };
 }
 

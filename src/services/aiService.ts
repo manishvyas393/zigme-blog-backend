@@ -5,7 +5,9 @@ import type { SearchResult, SelectedNews } from "../models/blogVersion.js";
 
 const openai = config.openAiApiKey ? new OpenAI({ apiKey: config.openAiApiKey }) : null;
 const LATEST_NEWS_CACHE_TTL_MS = 3 * 60 * 60 * 1000;
-const LATEST_NEWS_MAX_AGE_DAYS = 7;
+const LATEST_NEWS_MAX_AGE_DAYS = 3;
+const NEWS_ITEMS_PER_SECTION = 5;
+const NEWS_FETCH_REQUEST_COUNT = 12;
 
 class ExternalServiceError extends Error {
   statusCode: number;
@@ -218,6 +220,13 @@ function normalizeAndFilterRecentNews(items: SelectedNews[], count: number): Sel
     .slice(0, count);
 }
 
+function splitLatestNews(items: SelectedNews[]): LatestNewsResult {
+  return {
+    hiring: items.slice(0, NEWS_ITEMS_PER_SECTION),
+    talent: items.slice(NEWS_ITEMS_PER_SECTION, NEWS_ITEMS_PER_SECTION * 2)
+  };
+}
+
 function buildLatestNewsCacheKey(topic: string): string {
   return topic.trim().toLowerCase();
 }
@@ -363,13 +372,10 @@ export async function fetchLatestNews(topic: string): Promise<LatestNewsResult> 
   }).lean();
 
   if (cached) {
-    const recentItems = normalizeAndFilterRecentNews(cached.items, 10);
+    const recentItems = normalizeAndFilterRecentNews(cached.items, NEWS_ITEMS_PER_SECTION * 2);
 
-    if (recentItems.length > 0) {
-      return {
-        hiring: recentItems.slice(0, 5),
-        talent: recentItems.slice(5, 10)
-      };
+    if (recentItems.length >= NEWS_ITEMS_PER_SECTION * 2) {
+      return splitLatestNews(recentItems);
     }
   }
 
@@ -377,8 +383,8 @@ export async function fetchLatestNews(topic: string): Promise<LatestNewsResult> 
   const talentTopic = "campus drives, campus recruitment, fresher hiring, college placements, campus hiring news";
 
   const [hiringNews, talentNews] = await Promise.all([
-    fetchNewsForTopic(hiringTopic, 5),
-    fetchNewsForTopic(talentTopic, 5)
+    fetchNewsForTopic(hiringTopic, NEWS_FETCH_REQUEST_COUNT),
+    fetchNewsForTopic(talentTopic, NEWS_FETCH_REQUEST_COUNT)
   ]);
 
   const allItems = [...hiringNews, ...talentNews];

@@ -5,6 +5,7 @@ import type { SearchResult, SelectedNews } from "../models/blogVersion.js";
 
 const openai = config.openAiApiKey ? new OpenAI({ apiKey: config.openAiApiKey }) : null;
 const LATEST_NEWS_CACHE_TTL_MS = 3 * 60 * 60 * 1000;
+const LATEST_NEWS_MAX_AGE_DAYS = 7;
 
 class ExternalServiceError extends Error {
   statusCode: number;
@@ -95,7 +96,8 @@ function buildNewsPrompt(topic: string, count: number = 5): string {
 Instructions:
 - Focus on the newest available news right now.
 - Prefer items published today or within the last 24 hours.
-- If there are not enough, include the next most recent items.
+- Only return items published today or within the last ${LATEST_NEWS_MAX_AGE_DAYS} days.
+- If there are not enough, return fewer items instead of older ones.
 - Prefer reputable publications.
 - Return exactly ${count} items if possible.
 - Keep each snippet short and factual.
@@ -189,6 +191,31 @@ function parseNewsDate(value: string | undefined): number {
 
   const parsed = Date.parse(value);
   return Number.isNaN(parsed) ? 0 : parsed;
+}
+
+function getRecentNewsCutoff(): number {
+  return Date.now() - LATEST_NEWS_MAX_AGE_DAYS * 24 * 60 * 60 * 1000;
+}
+
+function isRecentNewsItem(item: SelectedNews): boolean {
+  const publishedAt = parseNewsDate(item.publishedAt);
+
+  if (!publishedAt) {
+    return false;
+  }
+
+  return publishedAt >= getRecentNewsCutoff();
+}
+
+function normalizeAndFilterRecentNews(items: SelectedNews[], count: number): SelectedNews[] {
+  return items
+    .map((item) => ({
+      ...item,
+      link: normalizeUrl(item.link)
+    }))
+    .filter((item) => item.link && isRecentNewsItem(item))
+    .sort((left, right) => parseNewsDate(right.publishedAt) - parseNewsDate(left.publishedAt))
+    .slice(0, count);
 }
 
 function buildLatestNewsCacheKey(topic: string): string {
@@ -322,14 +349,7 @@ async function fetchNewsForTopic(topic: string, count: number = 5): Promise<Sele
     } as any)) as AIServiceResponse;
 
     const parsed = parseJsonText<{ items: SelectedNews[] }>(response.output_text);
-    return parsed.items
-      .slice(0, count)
-      .map((item) => ({
-        ...item,
-        link: normalizeUrl(item.link)
-      }))
-      .filter((item) => item.link)
-      .sort((left, right) => parseNewsDate(right.publishedAt) - parseNewsDate(left.publishedAt));
+    return normalizeAndFilterRecentNews(parsed.items.slice(0, count), count);
   } catch (error) {
     throw toFriendlyOpenAIError(error);
   }
@@ -343,10 +363,14 @@ export async function fetchLatestNews(topic: string): Promise<LatestNewsResult> 
   }).lean();
 
   if (cached) {
-    return {
-      hiring: cached.items.slice(0, 5),
-      talent: cached.items.slice(5, 10)
-    };
+    const recentItems = normalizeAndFilterRecentNews(cached.items, 10);
+
+    if (recentItems.length > 0) {
+      return {
+        hiring: recentItems.slice(0, 5),
+        talent: recentItems.slice(5, 10)
+      };
+    }
   }
 
   const hiringTopic = "hiring strategies, recruitment trends, employer hiring, recruitment news, talent acquisition";

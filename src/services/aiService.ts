@@ -227,6 +227,49 @@ function splitLatestNews(items: SelectedNews[]): LatestNewsResult {
   };
 }
 
+function mergeRecentNews(existing: SelectedNews[], incoming: SelectedNews[]): SelectedNews[] {
+  const newsMap = new Map<string, SelectedNews>();
+
+  for (const item of [...existing, ...incoming]) {
+    const normalizedLink = normalizeUrl(item.link);
+
+    if (!normalizedLink || !isRecentNewsItem({ ...item, link: normalizedLink })) {
+      continue;
+    }
+
+    newsMap.set(normalizedLink, {
+      ...item,
+      link: normalizedLink
+    });
+  }
+
+  return Array.from(newsMap.values()).sort(
+    (left, right) => parseNewsDate(right.publishedAt) - parseNewsDate(left.publishedAt)
+  );
+}
+
+async function fetchNewsForTopicWithRetries(topic: string, targetCount: number): Promise<SelectedNews[]> {
+  const promptVariants = [
+    topic,
+    `${topic}, latest updates`,
+    `${topic}, breaking news from the last 3 days`,
+    `${topic}, recent developments`
+  ];
+
+  let collected: SelectedNews[] = [];
+
+  for (const variant of promptVariants) {
+    const fetched = await fetchNewsForTopic(variant, NEWS_FETCH_REQUEST_COUNT);
+    collected = mergeRecentNews(collected, fetched);
+
+    if (collected.length >= targetCount) {
+      break;
+    }
+  }
+
+  return collected.slice(0, targetCount);
+}
+
 function buildLatestNewsCacheKey(topic: string): string {
   return topic.trim().toLowerCase();
 }
@@ -383,8 +426,8 @@ export async function fetchLatestNews(topic: string): Promise<LatestNewsResult> 
   const talentTopic = "campus drives, campus recruitment, fresher hiring, college placements, campus hiring news";
 
   const [hiringNews, talentNews] = await Promise.all([
-    fetchNewsForTopic(hiringTopic, NEWS_FETCH_REQUEST_COUNT),
-    fetchNewsForTopic(talentTopic, NEWS_FETCH_REQUEST_COUNT)
+    fetchNewsForTopicWithRetries(hiringTopic, NEWS_ITEMS_PER_SECTION),
+    fetchNewsForTopicWithRetries(talentTopic, NEWS_ITEMS_PER_SECTION)
   ]);
 
   const cappedHiringNews = normalizeAndFilterRecentNews(hiringNews, NEWS_ITEMS_PER_SECTION);

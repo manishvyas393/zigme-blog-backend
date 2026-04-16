@@ -4,6 +4,8 @@ import {
   generateDraft,
   generateDraftFromNews,
   getBlogs,
+  getBlogBySelectedNewsLink,
+  getBlogsBySelectedNewsLink,
   getLatestNews,
   getBlogByReviewToken,
   rejectAndRegenerateByToken,
@@ -33,6 +35,16 @@ interface SendForApprovalBody {
 interface LatestNewsBody {
   site?: string;
   topic?: string;
+}
+
+interface BlogFromNewsQuery {
+  site?: string;
+  newsLink?: string;
+}
+
+interface BlogVersionsFromNewsQuery {
+  site?: string;
+  newsLink?: string;
 }
 
 interface GenerateFromNewsBody {
@@ -266,6 +278,63 @@ blogRouter.post(
       return res.json({
         hiring: news.hiring.map(serializeSelectedNews),
         talent: news.talent.map(serializeSelectedNews)
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown error";
+      return res.status(getResponseStatus(error, 500)).json({ message });
+    }
+  }
+);
+
+blogRouter.get(
+  "/from-news",
+  async (req: Request<Record<string, never>, unknown, unknown, BlogFromNewsQuery>, res: Response) => {
+    try {
+      const site = getQueryParam(req, "site") ?? req.query.site;
+      const newsLink = getQueryParam(req, "newsLink") ?? req.query.newsLink;
+
+      if (!site) {
+        return res.status(400).json({ message: "Site is required." });
+      }
+
+      if (!newsLink) {
+        return res.status(400).json({ message: "News link is required." });
+      }
+
+      const blog = await getBlogBySelectedNewsLink({ site, newsLink });
+
+      return res.json({
+        blog: blog ? serializeBlog(blog) : null
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown error";
+      return res.status(getResponseStatus(error, 500)).json({ message });
+    }
+  }
+);
+
+blogRouter.get(
+  "/from-news/list",
+  async (
+    req: Request<Record<string, never>, unknown, unknown, BlogVersionsFromNewsQuery>,
+    res: Response
+  ) => {
+    try {
+      const site = getQueryParam(req, "site") ?? req.query.site;
+      const newsLink = getQueryParam(req, "newsLink") ?? req.query.newsLink;
+
+      if (!site) {
+        return res.status(400).json({ message: "Site is required." });
+      }
+
+      if (!newsLink) {
+        return res.status(400).json({ message: "News link is required." });
+      }
+
+      const blogs = await getBlogsBySelectedNewsLink({ site, newsLink });
+
+      return res.json({
+        blogs: blogs.map(serializeBlog)
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown error";

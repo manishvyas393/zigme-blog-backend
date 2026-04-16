@@ -375,6 +375,44 @@ export async function getBlogByReviewToken(id: string): Promise<BlogVersionDocum
   return blog;
 }
 
+export async function getBlogBySelectedNewsLink({
+  site,
+  newsLink
+}: {
+  site: string;
+  newsLink: string;
+}): Promise<BlogVersionDocument | null> {
+  const trimmedLink = newsLink.trim();
+
+  if (!trimmedLink) {
+    return null;
+  }
+
+  return BlogVersionModel.findOne({
+    site,
+    "selected_news.link": trimmedLink
+  }).sort({ updated_at: -1, created_at: -1, revision: -1 });
+}
+
+export async function getBlogsBySelectedNewsLink({
+  site,
+  newsLink
+}: {
+  site: string;
+  newsLink: string;
+}): Promise<BlogVersionDocument[]> {
+  const trimmedLink = newsLink.trim();
+
+  if (!trimmedLink) {
+    return [];
+  }
+
+  return BlogVersionModel.find({
+    site,
+    "selected_news.link": trimmedLink
+  }).sort({ updated_at: -1, created_at: -1, revision: -1 });
+}
+
 export async function getBlogs(
   filters: BlogFilters = {},
   pagination: BlogPagination = { skip: 0, limit: 25 }

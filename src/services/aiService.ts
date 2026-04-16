@@ -316,8 +316,8 @@ function buildNewsPrompt(topic: string, count: number = 5): string {
 Instructions:
 - Focus on the newest available news right now.
 - Prefer items published today or within the last 24 hours.
-- Only return items published today or within the last ${LATEST_NEWS_MAX_AGE_DAYS} days.
-- If there are not enough, return fewer items instead of older ones.
+- Prefer items published today or within the last ${LATEST_NEWS_MAX_AGE_DAYS} days.
+- If there are not enough recent items, include slightly older relevant items rather than returning too few.
 - Prefer reputable publications.
 - Return exactly ${count} items if possible.
 - Keep each snippet short and factual.
@@ -432,15 +432,37 @@ function isRecentNewsItem(item: SelectedNews): boolean {
   return publishedAt >= getRecentNewsCutoff();
 }
 
-function normalizeAndFilterRecentNews(items: SelectedNews[], count: number): SelectedNews[] {
-  return items
-    .map((item) => ({
+function normalizeNewsCandidates(items: SelectedNews[]): SelectedNews[] {
+  const deduped = new Map<string, SelectedNews>();
+
+  for (const item of items) {
+    const link = normalizeUrl(item.link);
+
+    if (!link) {
+      continue;
+    }
+
+    deduped.set(link, {
       ...item,
-      link: normalizeUrl(item.link)
-    }))
-    .filter((item) => item.link && isRecentNewsItem(item))
-    .sort((left, right) => parseNewsDate(right.publishedAt) - parseNewsDate(left.publishedAt))
-    .slice(0, count);
+      link
+    });
+  }
+
+  return Array.from(deduped.values()).sort(
+    (left, right) => parseNewsDate(right.publishedAt) - parseNewsDate(left.publishedAt)
+  );
+}
+
+function fillNewsItems(items: SelectedNews[], count: number): SelectedNews[] {
+  const normalized = normalizeNewsCandidates(items);
+  const recentItems = normalized.filter((item) => isRecentNewsItem(item));
+  const olderItems = normalized.filter((item) => !isRecentNewsItem(item));
+
+  return [...recentItems, ...olderItems].slice(0, count);
+}
+
+function normalizeAndFilterRecentNews(items: SelectedNews[], count: number): SelectedNews[] {
+  return fillNewsItems(items, count);
 }
 
 function splitLatestNews(items: SelectedNews[]): LatestNewsResult {
@@ -451,7 +473,7 @@ function splitLatestNews(items: SelectedNews[]): LatestNewsResult {
 }
 
 function normalizeCachedNewsSection(items: SelectedNews[] | undefined): SelectedNews[] {
-  return normalizeAndFilterRecentNews(items || [], NEWS_ITEMS_PER_SECTION);
+  return fillNewsItems(items || [], NEWS_ITEMS_PER_SECTION);
 }
 
 function mergeRecentNews(existing: SelectedNews[], incoming: SelectedNews[]): SelectedNews[] {
@@ -494,7 +516,7 @@ async function fetchNewsForTopicWithRetries(topic: string, targetCount: number):
     }
   }
 
-  return collected.slice(0, targetCount);
+  return fillNewsItems(collected, targetCount);
 }
 
 function buildLatestNewsCacheKey(topic: string): string {
@@ -626,7 +648,7 @@ async function fetchNewsForTopic(topic: string, count: number = 5): Promise<Sele
     } as any)) as AIServiceResponse;
 
     const parsed = parseJsonText<{ items: SelectedNews[] }>(response.output_text);
-    return normalizeAndFilterRecentNews(parsed.items.slice(0, count), count);
+    return fillNewsItems(parsed.items.slice(0, count), count);
   } catch (error) {
     throw toFriendlyOpenAIError(error);
   }
@@ -665,8 +687,8 @@ export async function fetchLatestNews(topic: string): Promise<LatestNewsResult> 
     fetchNewsForTopicWithRetries(talentTopic, NEWS_ITEMS_PER_SECTION)
   ]);
 
-  const cappedHiringNews = normalizeAndFilterRecentNews(hiringNews, NEWS_ITEMS_PER_SECTION);
-  const cappedTalentNews = normalizeAndFilterRecentNews(talentNews, NEWS_ITEMS_PER_SECTION);
+  const cappedHiringNews = fillNewsItems(hiringNews, NEWS_ITEMS_PER_SECTION);
+  const cappedTalentNews = fillNewsItems(talentNews, NEWS_ITEMS_PER_SECTION);
   const allItems = [...cappedHiringNews, ...cappedTalentNews];
   const { startDate, endDate } = buildLatestNewsCacheDateRange();
 

@@ -497,6 +497,16 @@ function buildLatestNewsCacheKey(topic: string): string {
   return topic.trim().toLowerCase();
 }
 
+function buildLatestNewsCacheDateRange(): { startDate: string; endDate: string } {
+  const endDate = new Date();
+  const startDate = new Date(endDate.getTime() - LATEST_NEWS_CACHE_TTL_MS);
+
+  return {
+    startDate: startDate.toISOString(),
+    endDate: endDate.toISOString()
+  };
+}
+
 function isOpenAIQuotaError(error: unknown): boolean {
   const status = typeof error === "object" && error !== null ? (error as { status?: number }).status : undefined;
   const message = error instanceof Error ? error.message : String(error || "");
@@ -644,12 +654,15 @@ export async function fetchLatestNews(topic: string): Promise<LatestNewsResult> 
   const cappedHiringNews = normalizeAndFilterRecentNews(hiringNews, NEWS_ITEMS_PER_SECTION);
   const cappedTalentNews = normalizeAndFilterRecentNews(talentNews, NEWS_ITEMS_PER_SECTION);
   const allItems = [...cappedHiringNews, ...cappedTalentNews];
+  const { startDate, endDate } = buildLatestNewsCacheDateRange();
 
   await LatestNewsCacheModel.findOneAndUpdate(
     { cache_key: cacheKey },
     {
       cache_key: cacheKey,
       topic,
+      start_date: startDate,
+      end_date: endDate,
       items: allItems,
       expires_at: new Date(Date.now() + LATEST_NEWS_CACHE_TTL_MS)
     },

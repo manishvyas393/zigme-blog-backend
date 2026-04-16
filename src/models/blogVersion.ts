@@ -12,6 +12,7 @@ export interface SelectedNews {
   snippet: string;
   sourceName: string;
   publishedAt: string;
+  imageUrl?: string;
 }
 
 export interface StoredSelectedNews {

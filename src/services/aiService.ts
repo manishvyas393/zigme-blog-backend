@@ -106,6 +106,102 @@ function normalizeUrl(value: unknown): string {
   return "";
 }
 
+function normalizeImageUrl(value: unknown, baseUrl: string): string {
+  if (!value) {
+    return "";
+  }
+
+  const rawValue = String(value).trim();
+
+  if (!rawValue) {
+    return "";
+  }
+
+  try {
+    return new URL(rawValue, baseUrl).toString();
+  } catch {
+    return "";
+  }
+}
+
+function extractMetaImageUrl(html: string, baseUrl: string): string {
+  const patterns = [
+    /<meta[^>]+property=["']og:image(?:\:secure_url)?["'][^>]+content=["']([^"']+)["'][^>]*>/i,
+    /<meta[^>]+name=["']twitter:image(?:\:src)?["'][^>]+content=["']([^"']+)["'][^>]*>/i,
+    /<link[^>]+rel=["']image_src["'][^>]+href=["']([^"']+)["'][^>]*>/i
+  ];
+
+  for (const pattern of patterns) {
+    const match = html.match(pattern);
+
+    if (match?.[1]) {
+      const imageUrl = normalizeImageUrl(match[1], baseUrl);
+
+      if (imageUrl) {
+        return imageUrl;
+      }
+    }
+  }
+
+  return "";
+}
+
+async function fetchPageImageUrl(pageUrl: string): Promise<string> {
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 2500);
+
+    try {
+      const response = await fetch(pageUrl, {
+        method: "GET",
+        redirect: "follow",
+        signal: controller.signal,
+        headers: {
+          "user-agent": "Mozilla/5.0 (compatible; ZigMeBlogBot/1.0)"
+        }
+      });
+
+      if (!response.ok) {
+        return "";
+      }
+
+      const contentType = response.headers.get("content-type") || "";
+
+      if (!contentType.toLowerCase().includes("text/html")) {
+        return "";
+      }
+
+      const html = await response.text();
+      return extractMetaImageUrl(html.slice(0, 250000), response.url || pageUrl);
+    } finally {
+      clearTimeout(timeout);
+    }
+  } catch {
+    return "";
+  }
+}
+
+async function attachFeaturedImage(items: SelectedNews[]): Promise<SelectedNews[]> {
+  if (!items.length) {
+    return items;
+  }
+
+  const featuredItem = items[0];
+  const imageUrl = featuredItem.imageUrl || (featuredItem.link ? await fetchPageImageUrl(featuredItem.link) : "");
+
+  if (!imageUrl) {
+    return items;
+  }
+
+  return [
+    {
+      ...featuredItem,
+      imageUrl
+    },
+    ...items.slice(1)
+  ];
+}
+
 function buildResearchPrompt(site: string, prompt: string, wordRange: BlogWordRange): string {
   return `Research and write a professional, uncontroversial blog for ${site}.
 Topic prompt: ${prompt}
@@ -607,7 +703,8 @@ async function fetchNewsForTopic(topic: string, count: number = 5): Promise<Sele
       link: "https://example.com/news-placeholder",
       snippet: "Configure OPENAI_API_KEY to fetch live latest news.",
       sourceName: "Placeholder",
-      publishedAt: ""
+      publishedAt: "",
+      imageUrl: ""
     }));
   }
 
@@ -689,7 +786,11 @@ export async function fetchLatestNews(topic: string): Promise<LatestNewsResult> 
 
   const cappedHiringNews = fillNewsItems(hiringNews, NEWS_ITEMS_PER_SECTION);
   const cappedTalentNews = fillNewsItems(talentNews, NEWS_ITEMS_PER_SECTION);
-  const allItems = [...cappedHiringNews, ...cappedTalentNews];
+  const [featuredHiringNews, featuredTalentNews] = await Promise.all([
+    attachFeaturedImage(cappedHiringNews),
+    attachFeaturedImage(cappedTalentNews)
+  ]);
+  const allItems = [...featuredHiringNews, ...featuredTalentNews];
   const { startDate, endDate } = buildLatestNewsCacheDateRange();
 
   await LatestNewsCacheModel.findOneAndUpdate(
@@ -699,8 +800,8 @@ export async function fetchLatestNews(topic: string): Promise<LatestNewsResult> 
       topic,
       start_date: startDate,
       end_date: endDate,
-      hiring_items: cappedHiringNews,
-      talent_items: cappedTalentNews,
+      hiring_items: featuredHiringNews,
+      talent_items: featuredTalentNews,
       items: allItems,
       expires_at: new Date(Date.now() + LATEST_NEWS_CACHE_TTL_MS)
     },
@@ -708,8 +809,8 @@ export async function fetchLatestNews(topic: string): Promise<LatestNewsResult> 
   );
 
   return {
-    hiring: cappedHiringNews,
-    talent: cappedTalentNews
+    hiring: featuredHiringNews,
+    talent: featuredTalentNews
   };
 }
 

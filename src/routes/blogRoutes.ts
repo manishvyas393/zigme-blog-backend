@@ -53,6 +53,7 @@ interface GenerateFromNewsBody {
     snippet?: string;
     source_name?: string;
     published_at?: string;
+    image_url?: string;
   };
 }
 
@@ -141,7 +142,8 @@ function serializeSelectedNews(selectedNews: SelectedNews) {
     link: selectedNews.link,
     snippet: selectedNews.snippet,
     source_name: selectedNews.sourceName,
-    published_at: selectedNews.publishedAt
+    published_at: selectedNews.publishedAt,
+    image_url: selectedNews.imageUrl || ""
   };
 }
 
@@ -150,12 +152,17 @@ function normalizeSelectedNewsInput(value: GenerateFromNewsBody["selectedNews"])
     return null;
   }
 
+  const normalized = value as SelectedNews & {
+    image_url?: string;
+  };
+
   return {
     title: value.title || "",
     link: value.link || "",
     snippet: value.snippet || "",
     sourceName: "sourceName" in value ? (value.sourceName || "") : (value.source_name || ""),
-    publishedAt: "publishedAt" in value ? (value.publishedAt || "") : (value.published_at || "")
+    publishedAt: "publishedAt" in value ? (value.publishedAt || "") : (value.published_at || ""),
+    imageUrl: normalized.imageUrl || normalized.image_url || ""
   };
 }
 

@@ -20,7 +20,8 @@ const selectedNewsSchema = new mongoose.Schema<SelectedNews>(
     link: { type: String, required: true },
     snippet: { type: String, default: "" },
     sourceName: { type: String, default: "" },
-    publishedAt: { type: String, default: "" }
+    publishedAt: { type: String, default: "" },
+    imageUrl: { type: String, default: "" }
   },
   { _id: false }
 );

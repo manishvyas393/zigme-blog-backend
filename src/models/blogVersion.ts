@@ -22,17 +22,27 @@ export interface StoredSelectedNews {
   published_at: string;
 }
 
+export interface BlogImageAttachment {
+  name: string;
+  type: string;
+  size: number;
+  data_url: string;
+}
+
 export interface BlogVersion {
   blog_group_id: string;
   revision: number;
   site: "hiring.zigme.in" | "talent.zigme.in";
   prompt: string;
+  approval_email: string;
+  word_range: "0-500" | "500-1000" | "1000-1500" | "1500-2000";
   search_query: string;
   title: string;
   summary: string;
   html_content: string;
   status: "draft" | "pending" | "approved" | "rejected";
   selected_news: StoredSelectedNews | null;
+  attached_image: BlogImageAttachment | null;
   source_results: SearchResult[];
   generation_notes: string;
   created_at: Date;
@@ -59,6 +69,16 @@ const selectedNewsSchema = new mongoose.Schema<StoredSelectedNews>(
   { _id: false }
 );
 
+const blogImageAttachmentSchema = new mongoose.Schema<BlogImageAttachment>(
+  {
+    name: { type: String, default: "" },
+    type: { type: String, default: "" },
+    size: { type: Number, default: 0 },
+    data_url: { type: String, default: "" }
+  },
+  { _id: false }
+);
+
 const blogVersionSchema = new mongoose.Schema<BlogVersion>(
   {
     blog_group_id: { type: String, required: true, index: true },
@@ -69,6 +89,12 @@ const blogVersionSchema = new mongoose.Schema<BlogVersion>(
       required: true
     },
     prompt: { type: String, required: true },
+    approval_email: { type: String, default: "" },
+    word_range: {
+      type: String,
+      enum: ["0-500", "500-1000", "1000-1500", "1500-2000"],
+      default: "1000-1500"
+    },
     search_query: { type: String, required: true },
     title: { type: String, required: true },
     summary: { type: String, required: true },
@@ -79,6 +105,7 @@ const blogVersionSchema = new mongoose.Schema<BlogVersion>(
       default: "draft"
     },
     selected_news: { type: selectedNewsSchema, default: null },
+    attached_image: { type: blogImageAttachmentSchema, default: null },
     source_results: { type: [searchResultSchema], default: [] },
     generation_notes: { type: String, default: "" }
   },

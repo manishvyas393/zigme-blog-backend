@@ -15,6 +15,19 @@ import type { SelectedNews } from "../models/blogVersion.js";
 interface GenerateBody {
   site?: string;
   prompt?: string;
+  approvalEmail?: string;
+  wordRange?: string;
+  attachedImage?: {
+    name?: string;
+    type?: string;
+    size?: number;
+    dataUrl?: string;
+    data_url?: string;
+  };
+}
+
+interface SendForApprovalBody {
+  approvalEmail?: string;
 }
 
 interface LatestNewsBody {
@@ -25,6 +38,15 @@ interface LatestNewsBody {
 interface GenerateFromNewsBody {
   site?: string;
   prompt?: string;
+  approvalEmail?: string;
+  wordRange?: string;
+  attachedImage?: {
+    name?: string;
+    type?: string;
+    size?: number;
+    dataUrl?: string;
+    data_url?: string;
+  };
   selectedNews?: SelectedNews | {
     title?: string;
     link?: string;
@@ -50,6 +72,39 @@ interface BlogListQuery {
 }
 
 const validStatuses: BlogStatus[] = ["draft", "pending", "approved", "rejected"];
+const validWordRanges = ["0-500", "500-1000", "1000-1500", "1500-2000"] as const;
+
+function isValidEmail(value: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+}
+
+function normalizeWordRange(value: unknown): "0-500" | "500-1000" | "1000-1500" | "1500-2000" {
+  if (typeof value === "string" && (validWordRanges as readonly string[]).includes(value)) {
+    return value as "0-500" | "500-1000" | "1000-1500" | "1500-2000";
+  }
+
+  return "1000-1500";
+}
+
+function normalizeAttachedImage(value: GenerateBody["attachedImage"]) {
+  if (!value) {
+    return null;
+  }
+
+  const dataUrl = value.dataUrl || value.data_url || "";
+  const size = typeof value.size === "number" ? value.size : Number(value.size || 0);
+
+  if (!dataUrl) {
+    return null;
+  }
+
+  return {
+    name: value.name || "Uploaded image",
+    type: value.type || "",
+    size,
+    data_url: dataUrl
+  };
+}
 
 function getResponseStatus(error: unknown, fallback: number): number {
   if (typeof error === "object" && error !== null) {
@@ -159,13 +214,29 @@ blogRouter.post(
   "/generate",
   async (req: Request<Record<string, never>, unknown, GenerateBody>, res: Response) => {
     try {
-      const { site, prompt } = req.body;
+      const { site, prompt, approvalEmail } = req.body;
+      const wordRange = normalizeWordRange(req.body.wordRange);
+      const attachedImage = normalizeAttachedImage(req.body.attachedImage);
 
       if (!site || !prompt) {
         return res.status(400).json({ message: "Both site and prompt are required." });
       }
 
-      const blog = await generateDraft({ site, prompt });
+      if (approvalEmail && !isValidEmail(approvalEmail.trim())) {
+        return res.status(400).json({ message: "Approval email must be a valid email address." });
+      }
+
+      if (attachedImage?.size && attachedImage.size > 5 * 1024 * 1024) {
+        return res.status(400).json({ message: "Attached image must be 5 MB or smaller." });
+      }
+
+      const blog = await generateDraft({
+        site,
+        prompt,
+        approvalEmail: approvalEmail?.trim(),
+        wordRange,
+        attachedImage
+      });
       return res.status(201).json(serializeBlog(blog));
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown error";
@@ -200,17 +271,30 @@ blogRouter.post(
   "/generate-from-news",
   async (req: Request<Record<string, never>, unknown, GenerateFromNewsBody>, res: Response) => {
     try {
-      const { site, prompt } = req.body;
+      const { site, prompt, approvalEmail } = req.body;
       const selectedNews = normalizeSelectedNewsInput(req.body.selectedNews);
+      const wordRange = normalizeWordRange(req.body.wordRange);
+      const attachedImage = normalizeAttachedImage(req.body.attachedImage);
 
       if (!site || !selectedNews?.title || !selectedNews?.link) {
         return res.status(400).json({ message: "Site and selected news are required." });
       }
 
+      if (approvalEmail && !isValidEmail(approvalEmail.trim())) {
+        return res.status(400).json({ message: "Approval email must be a valid email address." });
+      }
+
+      if (attachedImage?.size && attachedImage.size > 5 * 1024 * 1024) {
+        return res.status(400).json({ message: "Attached image must be 5 MB or smaller." });
+      }
+
       const blog = await generateDraftFromNews({
         site,
         prompt: prompt?.trim() || selectedNews.title,
-        selectedNews
+        selectedNews,
+        approvalEmail: approvalEmail?.trim(),
+        wordRange,
+        attachedImage
       });
 
       return res.status(201).json(serializeBlog(blog));
@@ -221,9 +305,11 @@ blogRouter.post(
   }
 );
 
-blogRouter.post("/:id/send-for-approval", async (req: Request<{ id: string }>, res: Response) => {
+blogRouter.post(
+  "/:id/send-for-approval",
+  async (req: Request<{ id: string }, unknown, SendForApprovalBody>, res: Response) => {
   try {
-    const result = await sendForApproval(req.params.id);
+    const result = await sendForApproval(req.params.id, req.body.approvalEmail);
     return res.json({
       blog: serializeBlog(result.blog),
       mail_result: result.mailResult

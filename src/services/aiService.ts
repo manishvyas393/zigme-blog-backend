@@ -1,7 +1,7 @@
 import { OpenAI } from "openai";
 import { config } from "../config.js";
 import { LatestNewsCacheModel } from "../models/latestNewsCache.js";
-import type { SearchResult, SelectedNews } from "../models/blogVersion.js";
+import type { BlogImageAttachment, SearchResult, SelectedNews } from "../models/blogVersion.js";
 
 const openai = config.openAiApiKey ? new OpenAI({ apiKey: config.openAiApiKey }) : null;
 const LATEST_NEWS_CACHE_TTL_MS = 3 * 60 * 60 * 1000;
@@ -25,6 +25,47 @@ interface BlogGenerationResult {
   htmlContent: string;
   generationNotes: string;
   sourceResults: SearchResult[];
+}
+
+type BlogWordRange = "0-500" | "500-1000" | "1000-1500" | "1500-2000";
+
+function getWordRangeBounds(wordRange: BlogWordRange): { min: number; max: number } {
+  switch (wordRange) {
+    case "0-500":
+      return { min: 0, max: 500 };
+    case "500-1000":
+      return { min: 500, max: 1000 };
+    case "1000-1500":
+      return { min: 1000, max: 1500 };
+    case "1500-2000":
+      return { min: 1500, max: 2000 };
+    default:
+      return { min: 500, max: 1000 };
+  }
+}
+
+function getWordRangePlan(wordRange: BlogWordRange): {
+  min: number;
+  max: number;
+  target: number;
+  sections: string;
+} {
+  const { min, max } = getWordRangeBounds(wordRange);
+  const target = Math.round((min + max) / 2);
+
+  if (min >= 1500) {
+    return { min, max, target, sections: "5-7" };
+  }
+
+  if (min >= 1000) {
+    return { min, max, target, sections: "4-6" };
+  }
+
+  if (min >= 500) {
+    return { min, max, target, sections: "3-4" };
+  }
+
+  return { min, max, target, sections: "2-3" };
 }
 
 interface LatestNewsResult {
@@ -65,15 +106,14 @@ function normalizeUrl(value: unknown): string {
   return "";
 }
 
-function buildResearchPrompt(site: string, prompt: string): string {
+function buildResearchPrompt(site: string, prompt: string, wordRange: BlogWordRange): string {
   return `Research and write a professional, uncontroversial blog for ${site}.
 Topic prompt: ${prompt}
 
 Instructions:
 - Search the web first and use the findings to ground the blog.
-- Keep the article concise and practical.
-- Use a short intro, 2-3 brief sections, and compact paragraphs.
-- Aim for roughly 400-600 words.
+- Keep the article focused and practical.
+- ${buildWordCountInstruction(wordRange)}
 - Prefer practical, business-safe, non-controversial guidance.
 - Avoid political, medical, legal, or sensational claims.
 - Do not invent facts.
@@ -88,6 +128,184 @@ title
 summary
 htmlContent
 generationNotes`;
+}
+
+function buildWordCountInstruction(wordRange: BlogWordRange): string {
+  const { min, max, target, sections } = getWordRangePlan(wordRange);
+
+  switch (wordRange) {
+    case "0-500":
+      return `Hard requirement: keep the article between ${min} and ${max} words. Aim for about ${target} words and use ${sections} short sections.`;
+    case "500-1000":
+      return `Hard requirement: keep the article between ${min} and ${max} words. Aim for about ${target} words and use ${sections} focused sections.`;
+    case "1000-1500":
+      return `Hard requirement: keep the article between ${min} and ${max} words. Aim for about ${target} words and use ${sections} substantial sections.`;
+    case "1500-2000":
+      return `Hard requirement: keep the article between ${min} and ${max} words. Aim for about ${target} words and use ${sections} substantial sections.`;
+    default:
+      return `Hard requirement: keep the article between ${min} and ${max} words. Aim for about ${target} words.`;
+  }
+}
+
+function countWords(value: string): number {
+  return String(value || "")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/g, " ")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean).length;
+}
+
+async function requestBlogResponse({
+  input,
+  schemaName,
+  useWebSearch
+}: {
+  input: string;
+  schemaName: string;
+  useWebSearch: boolean;
+}): Promise<AIServiceResponse> {
+  return (await openai!.responses.create({
+    model: config.blogModel,
+    ...(useWebSearch
+      ? { include: ["web_search_call.action.sources"] as any, tools: [{ type: "web_search" }] }
+      : {}),
+    input,
+    text: {
+      format: {
+        type: "json_schema",
+        name: schemaName,
+        schema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            title: { type: "string" },
+            summary: { type: "string" },
+            htmlContent: { type: "string" },
+            generationNotes: { type: "string" }
+          },
+          required: ["title", "summary", "htmlContent", "generationNotes"]
+        }
+      }
+    }
+  } as any)) as AIServiceResponse;
+}
+
+async function generateBlogWithRetries({
+  site,
+  prompt,
+  wordRange,
+  attachedImage,
+  selectedNews,
+  basePrompt,
+  schemaName,
+  useWebSearch
+}: {
+  site: string;
+  prompt: string;
+  wordRange: BlogWordRange;
+  attachedImage?: BlogImageAttachment | null;
+  selectedNews?: SelectedNews;
+  basePrompt: string;
+  schemaName: string;
+  useWebSearch: boolean;
+}): Promise<BlogGenerationResult> {
+  const { min } = getWordRangePlan(wordRange);
+  const maxAttempts = 3;
+  let parsed: Omit<BlogGenerationResult, "sourceResults"> | null = null;
+  let response: AIServiceResponse | null = null;
+  let currentWordCount = 0;
+
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const input =
+      attempt === 0
+        ? basePrompt
+        : buildExpansionPrompt(site, prompt, wordRange, selectedNews, currentWordCount);
+
+    response = await requestBlogResponse({
+      input,
+      schemaName,
+      useWebSearch
+    });
+
+    parsed = parseJsonText<Omit<BlogGenerationResult, "sourceResults">>(response.output_text);
+    currentWordCount = countWords(parsed.htmlContent);
+
+    if (currentWordCount >= min) {
+      break;
+    }
+  }
+
+  if (!parsed || !response) {
+    throw new Error("Blog generation failed.");
+  }
+
+  return {
+    ...parsed,
+    htmlContent: prependFeaturedImage(parsed.htmlContent, attachedImage),
+    sourceResults: useWebSearch ? extractSources(response) : []
+  };
+}
+
+function buildExpansionPrompt(
+  site: string,
+  prompt: string,
+  wordRange: BlogWordRange,
+  selectedNews?: SelectedNews,
+  currentWordCount?: number
+): string {
+  const { min, max, target, sections } = getWordRangePlan(wordRange);
+  const newsContext = selectedNews
+    ? `Selected news item:\nTitle: ${selectedNews.title}\nSnippet: ${selectedNews.snippet || ""}\n`
+    : "";
+  const wordCountContext =
+    typeof currentWordCount === "number" ? `The previous draft was ${currentWordCount} words.\n` : "";
+
+  return `You previously wrote a draft that was too short.
+
+${wordCountContext}Rewrite the blog for ${site} so it is between ${min} and ${max} words.
+Main topic prompt: ${prompt}
+
+${newsContext}Instructions:
+- Expand the article substantially.
+- Aim for about ${target} words and use ${sections} clear sections.
+- Add deeper explanation, practical examples, and a fuller conclusion.
+- Keep the tone professional and business-safe.
+- Do not add markdown links or raw URLs.
+- Do not mention that this is a revision.
+
+Return JSON with exactly these keys:
+title
+summary
+htmlContent
+generationNotes`;
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function prependFeaturedImage(
+  htmlContent: string,
+  attachment?: BlogImageAttachment | null
+): string {
+  if (!attachment?.data_url) {
+    return htmlContent;
+  }
+
+  const escapedName = escapeHtml(attachment.name || "Uploaded image");
+  const imageMarkup = `
+    <figure class="blog-feature-image">
+      <img src="${attachment.data_url}" alt="${escapedName}" />
+    </figure>
+  `;
+
+  return `${imageMarkup}${htmlContent}`;
 }
 
 function buildNewsPrompt(topic: string, count: number = 5): string {
@@ -121,7 +339,12 @@ Return JSON with exactly this shape:
 }`;
 }
 
-function buildNewsBasedBlogPrompt(site: string, prompt: string, selectedNews: SelectedNews): string {
+function buildNewsBasedBlogPrompt(
+  site: string,
+  prompt: string,
+  selectedNews: SelectedNews,
+  wordRange: BlogWordRange
+): string {
   return `Research and write a professional, uncontroversial blog for ${site}.
 Main topic prompt: ${prompt}
 
@@ -137,7 +360,7 @@ Instructions:
 - Do not browse the web. Use only the selected news item and the topic prompt.
 - Keep the article concise and practical.
 - Use a short intro, 2-3 brief sections, and compact paragraphs.
-- Aim for roughly 400-600 words.
+- ${buildWordCountInstruction(wordRange)}
 - Prefer practical, business-safe, non-controversial guidance.
 - Avoid political, medical, legal, or sensational claims.
 - Do not invent facts.
@@ -295,59 +518,47 @@ function toFriendlyOpenAIError(error: unknown): ExternalServiceError {
 
 export async function generateBlog({
   site,
-  prompt
+  prompt,
+  wordRange,
+  attachedImage
 }: {
   site: string;
   prompt: string;
+  wordRange: BlogWordRange;
+  attachedImage?: BlogImageAttachment | null;
 }): Promise<BlogGenerationResult> {
   if (!openai) {
-    return {
+    const placeholder = {
       title: `Draft blog for ${site}: ${prompt}`,
       summary: "OpenAI API key is missing, so this is a placeholder draft.",
-      htmlContent: `
+      htmlContent: prependFeaturedImage(
+        `
         <article>
           <h1>Draft blog for ${site}</h1>
           <p>This placeholder was created because <code>OPENAI_API_KEY</code> is not configured.</p>
           <h2>Requested topic</h2>
           <p>${prompt}</p>
         </article>
-      `,
+        `,
+        attachedImage
+      ),
       generationNotes: "Placeholder generated because OPENAI_API_KEY is not configured.",
       sourceResults: []
     };
+
+    return placeholder;
   }
 
   try {
-    const response = (await openai.responses.create({
-      model: config.blogModel,
-      include: ["web_search_call.action.sources"] as any,
-      tools: [{ type: "web_search" }],
-      input: buildResearchPrompt(site, prompt),
-      text: {
-        format: {
-          type: "json_schema",
-          name: "blog_generation",
-          schema: {
-            type: "object",
-            additionalProperties: false,
-            properties: {
-              title: { type: "string" },
-              summary: { type: "string" },
-              htmlContent: { type: "string" },
-              generationNotes: { type: "string" }
-            },
-            required: ["title", "summary", "htmlContent", "generationNotes"]
-          }
-        }
-      }
-    } as any)) as AIServiceResponse;
-
-    const parsed = parseJsonText<Omit<BlogGenerationResult, "sourceResults">>(response.output_text);
-
-    return {
-      ...parsed,
-      sourceResults: extractSources(response)
-    };
+    return await generateBlogWithRetries({
+      site,
+      prompt,
+      wordRange,
+      attachedImage,
+      basePrompt: buildResearchPrompt(site, prompt, wordRange),
+      schemaName: "blog_generation",
+      useWebSearch: true
+    });
   } catch (error) {
     throw toFriendlyOpenAIError(error);
   }
@@ -454,57 +665,48 @@ export async function fetchLatestNews(topic: string): Promise<LatestNewsResult> 
 export async function generateBlogFromNews({
   site,
   prompt,
-  selectedNews
+  selectedNews,
+  wordRange,
+  attachedImage
 }: {
   site: string;
   prompt: string;
   selectedNews: SelectedNews;
+  wordRange: BlogWordRange;
+  attachedImage?: BlogImageAttachment | null;
 }): Promise<BlogGenerationResult> {
   if (!openai) {
-    return {
+    const placeholder = {
       title: `Draft blog for ${site}: ${selectedNews.title}`,
       summary: "OpenAI API key is missing, so this is a placeholder draft.",
-      htmlContent: `
+      htmlContent: prependFeaturedImage(
+        `
         <article>
           <h1>${selectedNews.title}</h1>
           <p>This placeholder was created because <code>OPENAI_API_KEY</code> is not configured.</p>
           <p>${selectedNews.snippet || ""}</p>
         </article>
-      `,
+        `,
+        attachedImage
+      ),
       generationNotes: "Placeholder generated because OPENAI_API_KEY is not configured.",
       sourceResults: []
     };
+
+    return placeholder;
   }
 
   try {
-    const response = (await openai.responses.create({
-      model: config.blogModel,
-      input: buildNewsBasedBlogPrompt(site, prompt, selectedNews),
-      text: {
-        format: {
-          type: "json_schema",
-          name: "blog_generation_from_news",
-          schema: {
-            type: "object",
-            additionalProperties: false,
-            properties: {
-              title: { type: "string" },
-              summary: { type: "string" },
-              htmlContent: { type: "string" },
-              generationNotes: { type: "string" }
-            },
-            required: ["title", "summary", "htmlContent", "generationNotes"]
-          }
-        }
-      }
-    } as any)) as AIServiceResponse;
-
-    const parsed = parseJsonText<Omit<BlogGenerationResult, "sourceResults">>(response.output_text);
-
-    return {
-      ...parsed,
-      sourceResults: []
-    };
+    return await generateBlogWithRetries({
+      site,
+      prompt,
+      wordRange,
+      attachedImage,
+      selectedNews,
+      basePrompt: buildNewsBasedBlogPrompt(site, prompt, selectedNews, wordRange),
+      schemaName: "blog_generation_from_news",
+      useWebSearch: false
+    });
   } catch (error) {
     throw toFriendlyOpenAIError(error);
   }

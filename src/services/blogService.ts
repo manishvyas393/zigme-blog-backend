@@ -1,5 +1,6 @@
 import {
   BlogVersionModel,
+  type BlogImageAttachment,
   type BlogVersion,
   type BlogVersionDocument,
   type SearchResult,
@@ -15,6 +16,9 @@ interface CreateVersionInput {
   revision: number;
   site: string;
   prompt: string;
+  approvalEmail?: string;
+  wordRange: BlogVersion["word_range"];
+  attachedImage?: BlogImageAttachment | null;
   selectedNews?: SelectedNews | null;
 }
 
@@ -56,16 +60,54 @@ interface PublicBlog {
   revision: number;
   site: BlogVersion["site"];
   prompt: string;
+  approval_email: string;
+  word_range: BlogVersion["word_range"];
   search_query: string;
   title: string;
   summary: string;
   html_content: string;
   status: BlogVersion["status"];
   selected_news: StoredSelectedNews | null;
+  attached_image: BlogImageAttachment | null;
   source_results: SearchResult[];
   generation_notes: string;
   created_at: Date;
   updated_at: Date;
+}
+
+function normalizeWordRange(value: unknown): BlogVersion["word_range"] {
+  if (value === "0-500" || value === "1000-1500" || value === "1500-2000") {
+    return value;
+  }
+
+  return "1000-1500";
+}
+
+function validateApprovalEmail(value: string): string {
+  const trimmed = value.trim();
+
+  if (!trimmed) {
+    throw new Error("Approval email is required.");
+  }
+
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
+    throw new Error("Approval email must be a valid email address.");
+  }
+
+  return trimmed;
+}
+
+function normalizeAttachedImage(attachedImage?: BlogImageAttachment | null): BlogImageAttachment | null {
+  if (!attachedImage?.data_url) {
+    return null;
+  }
+
+  return {
+    name: attachedImage.name || "Uploaded image",
+    type: attachedImage.type || "",
+    size: Number(attachedImage.size) || 0,
+    data_url: attachedImage.data_url
+  };
 }
 
 function sanitizeSelectedNews(selectedNews: SelectedNews | null | undefined): SelectedNews | null {
@@ -122,12 +164,15 @@ export function serializeBlog(blog: BlogVersionDocument): PublicBlog {
     revision: blog.revision,
     site: blog.site,
     prompt: blog.prompt,
+    approval_email: blog.approval_email,
+    word_range: blog.word_range,
     search_query: blog.search_query,
     title: blog.title,
     summary: blog.summary,
     html_content: blog.html_content,
     status: blog.status,
     selected_news: blog.selected_news,
+    attached_image: blog.attached_image,
     source_results: blog.source_results,
     generation_notes: blog.generation_notes,
     created_at: blog.created_at,
@@ -150,18 +195,27 @@ async function createVersion({
   revision,
   site,
   prompt,
+  approvalEmail,
+  wordRange,
+  attachedImage,
   selectedNews = null
 }: CreateVersionInput): Promise<BlogVersionDocument> {
   const safeSelectedNews = sanitizeSelectedNews(selectedNews);
+  const safeWordRange = normalizeWordRange(wordRange);
+  const safeAttachedImage = normalizeAttachedImage(attachedImage);
   const generated = safeSelectedNews
     ? await generateBlogFromNews({
         site,
         prompt,
-        selectedNews: safeSelectedNews
+        selectedNews: safeSelectedNews,
+        wordRange: safeWordRange,
+        attachedImage: safeAttachedImage
       })
     : await generateBlog({
         site,
-        prompt
+        prompt,
+        wordRange: safeWordRange,
+        attachedImage: safeAttachedImage
       });
 
   const blog = await BlogVersionModel.create({
@@ -169,8 +223,11 @@ async function createVersion({
     revision,
     site,
     prompt,
+    approval_email: "",
+    word_range: safeWordRange,
     search_query: prompt,
     selected_news: toStoredSelectedNews(safeSelectedNews),
+    attached_image: safeAttachedImage,
     title: generated.title,
     summary: generated.summary,
     html_content: generated.htmlContent,
@@ -188,15 +245,24 @@ async function createVersion({
 
 export async function generateDraft({
   site,
-  prompt
+  prompt,
+  approvalEmail,
+  wordRange,
+  attachedImage
 }: {
   site: string;
   prompt: string;
+  approvalEmail?: string;
+  wordRange: BlogVersion["word_range"];
+  attachedImage?: BlogImageAttachment | null;
 }): Promise<BlogVersionDocument> {
   return createVersion({
     revision: 1,
     site,
-    prompt
+    prompt,
+    approvalEmail,
+    wordRange,
+    attachedImage
   });
 }
 
@@ -213,11 +279,17 @@ export async function getLatestNews({
 export async function generateDraftFromNews({
   site,
   prompt,
-  selectedNews
+  selectedNews,
+  approvalEmail,
+  wordRange,
+  attachedImage
 }: {
   site: string;
   prompt: string;
   selectedNews: SelectedNews;
+  approvalEmail?: string;
+  wordRange: BlogVersion["word_range"];
+  attachedImage?: BlogImageAttachment | null;
 }): Promise<BlogVersionDocument> {
   const safeSelectedNews = sanitizeSelectedNews(selectedNews);
 
@@ -225,15 +297,22 @@ export async function generateDraftFromNews({
     revision: 1,
     site,
     prompt,
+    approvalEmail,
+    wordRange,
+    attachedImage,
     selectedNews: safeSelectedNews
   });
 }
 
-export async function sendForApproval(versionId: string) {
+export async function sendForApproval(versionId: string, approvalEmail?: string) {
   const blog = await BlogVersionModel.findById(versionId);
 
   if (!blog) {
     throw new Error("Blog version not found.");
+  }
+
+  if (approvalEmail) {
+    blog.approval_email = validateApprovalEmail(approvalEmail);
   }
 
   blog.status = "pending";
@@ -272,6 +351,9 @@ export async function rejectAndRegenerateByToken(id: string) {
     revision: blog.revision + 1,
     site: blog.site,
     prompt: blog.prompt,
+    approvalEmail: blog.approval_email,
+    wordRange: blog.word_range,
+    attachedImage: blog.attached_image,
     selectedNews: fromStoredSelectedNews(blog.selected_news)
   });
 

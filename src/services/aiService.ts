@@ -450,6 +450,10 @@ function splitLatestNews(items: SelectedNews[]): LatestNewsResult {
   };
 }
 
+function normalizeCachedNewsSection(items: SelectedNews[] | undefined): SelectedNews[] {
+  return normalizeAndFilterRecentNews(items || [], NEWS_ITEMS_PER_SECTION);
+}
+
 function mergeRecentNews(existing: SelectedNews[], incoming: SelectedNews[]): SelectedNews[] {
   const newsMap = new Map<string, SelectedNews>();
 
@@ -636,9 +640,19 @@ export async function fetchLatestNews(topic: string): Promise<LatestNewsResult> 
   }).lean();
 
   if (cached) {
-    const recentItems = normalizeAndFilterRecentNews(cached.items, NEWS_ITEMS_PER_SECTION * 2);
+    const cachedHiring = normalizeCachedNewsSection(cached.hiring_items);
+    const cachedTalent = normalizeCachedNewsSection(cached.talent_items);
 
-    if (recentItems.length >= NEWS_ITEMS_PER_SECTION * 2) {
+    if (cachedHiring.length > 0 || cachedTalent.length > 0) {
+      return {
+        hiring: cachedHiring,
+        talent: cachedTalent
+      };
+    }
+
+    const recentItems = normalizeAndFilterRecentNews(cached.items || [], NEWS_ITEMS_PER_SECTION * 2);
+
+    if (recentItems.length > 0) {
       return splitLatestNews(recentItems);
     }
   }
@@ -663,6 +677,8 @@ export async function fetchLatestNews(topic: string): Promise<LatestNewsResult> 
       topic,
       start_date: startDate,
       end_date: endDate,
+      hiring_items: cappedHiringNews,
+      talent_items: cappedTalentNews,
       items: allItems,
       expires_at: new Date(Date.now() + LATEST_NEWS_CACHE_TTL_MS)
     },

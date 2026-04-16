@@ -6,6 +6,8 @@ export interface LatestNewsCache {
   topic: string;
   start_date: string;
   end_date: string;
+  hiring_items: SelectedNews[];
+  talent_items: SelectedNews[];
   items: SelectedNews[];
   expires_at: Date;
   created_at: Date;
@@ -29,6 +31,8 @@ const latestNewsCacheSchema = new mongoose.Schema<LatestNewsCache>(
     topic: { type: String, required: true },
     start_date: { type: String, required: true },
     end_date: { type: String, required: true },
+    hiring_items: { type: [selectedNewsSchema], default: [] },
+    talent_items: { type: [selectedNewsSchema], default: [] },
     items: { type: [selectedNewsSchema], default: [] },
     expires_at: { type: Date, required: true, index: { expires: 0 } }
   },

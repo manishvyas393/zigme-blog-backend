@@ -2,6 +2,7 @@ import { OpenAI } from "openai";
 import { config } from "../config.js";
 import { LatestNewsCacheModel } from "../models/latestNewsCache.js";
 import type { BlogImageAttachment, SearchResult, SelectedNews } from "../models/blogVersion.js";
+import { searchGoogleNews } from "../utils/googleNewsSearch.js";
 
 const openai = config.openAiApiKey ? new OpenAI({ apiKey: config.openAiApiKey }) : null;
 const LATEST_NEWS_CACHE_TTL_MS = 3 * 60 * 60 * 1000;
@@ -104,6 +105,14 @@ function normalizeUrl(value: unknown): string {
   }
 
   return "";
+}
+
+function defaultNewsTopicForSite(site: string): string {
+  if (site.includes("talent.zigme.in")) {
+    return "campus drives, campus recruitment, fresher hiring, college placements, campus hiring news";
+  }
+
+  return "hiring strategies, recruitment trends, employer hiring, recruitment news, talent acquisition";
 }
 
 function normalizeImageUrl(value: unknown, baseUrl: string): string {
@@ -404,37 +413,6 @@ function prependFeaturedImage(
   return `${imageMarkup}${htmlContent}`;
 }
 
-function buildNewsPrompt(topic: string, count: number = 5): string {
-  const today = new Date().toISOString().slice(0, 10);
-
-  return `Search the web for the ${count} most recent important news items about: ${topic}
-
-Instructions:
-- Focus on the newest available news right now.
-- Prefer items published today or within the last 24 hours.
-- Prefer items published today or within the last ${LATEST_NEWS_MAX_AGE_DAYS} days.
-- If there are not enough recent items, include slightly older relevant items rather than returning too few.
-- Prefer reputable publications.
-- Return exactly ${count} items if possible.
-- Keep each snippet short and factual.
-- Use ISO-style date strings when a publication date is available.
-- Do not return stale or evergreen results if fresher news is available.
-- Today's date is ${today}.
-
-Return JSON with exactly this shape:
-{
-  "items": [
-    {
-      "title": "string",
-      "link": "string",
-      "snippet": "string",
-      "sourceName": "string",
-      "publishedAt": "string"
-    }
-  ]
-}`;
-}
-
 function buildNewsBasedBlogPrompt(
   site: string,
   prompt: string,
@@ -648,6 +626,11 @@ function toFriendlyOpenAIError(error: unknown): ExternalServiceError {
   return new ExternalServiceError(message, 502);
 }
 
+function toFriendlyNewsError(error: unknown): ExternalServiceError {
+  const message = error instanceof Error ? error.message : "Google News request failed.";
+  return new ExternalServiceError(message, 502);
+}
+
 export async function generateBlog({
   site,
   prompt,
@@ -697,62 +680,16 @@ export async function generateBlog({
 }
 
 async function fetchNewsForTopic(topic: string, count: number = 5): Promise<SelectedNews[]> {
-  if (!openai) {
-    return Array.from({ length: count }, (_, index) => ({
-      title: `Placeholder latest news ${index + 1} for ${topic}`,
-      link: "https://example.com/news-placeholder",
-      snippet: "Configure OPENAI_API_KEY to fetch live latest news.",
-      sourceName: "Placeholder",
-      publishedAt: "",
-      imageUrl: ""
-    }));
-  }
-
   try {
-    const response = (await openai.responses.create({
-      model: config.newsModel,
-      include: ["web_search_call.action.sources"] as any,
-      tools: [{ type: "web_search" }],
-      input: buildNewsPrompt(topic, count),
-      text: {
-        format: {
-          type: "json_schema",
-          name: "latest_news",
-          schema: {
-            type: "object",
-            additionalProperties: false,
-            properties: {
-              items: {
-                type: "array",
-                items: {
-                  type: "object",
-                  additionalProperties: false,
-                  properties: {
-                    title: { type: "string" },
-                    link: { type: "string" },
-                    snippet: { type: "string" },
-                    sourceName: { type: "string" },
-                    publishedAt: { type: "string" }
-                  },
-                  required: ["title", "link", "snippet", "sourceName", "publishedAt"]
-                }
-              }
-            },
-            required: ["items"]
-          }
-        }
-      }
-    } as any)) as AIServiceResponse;
-
-    const parsed = parseJsonText<{ items: SelectedNews[] }>(response.output_text);
-    return fillNewsItems(parsed.items.slice(0, count), count);
+    const fetched = await searchGoogleNews(topic, count);
+    return fillNewsItems(fetched, count);
   } catch (error) {
-    throw toFriendlyOpenAIError(error);
+    throw toFriendlyNewsError(error);
   }
 }
 
-export async function fetchLatestNews(topic: string): Promise<LatestNewsResult> {
-  const cacheKey = buildLatestNewsCacheKey(topic);
+export async function fetchLatestNews(site: string): Promise<LatestNewsResult> {
+  const cacheKey = buildLatestNewsCacheKey(site);
   const cached = await LatestNewsCacheModel.findOne({
     cache_key: cacheKey,
     expires_at: { $gt: new Date() }
@@ -776,41 +713,30 @@ export async function fetchLatestNews(topic: string): Promise<LatestNewsResult> 
     }
   }
 
-  const hiringTopic = "hiring strategies, recruitment trends, employer hiring, recruitment news, talent acquisition";
-  const talentTopic = "campus drives, campus recruitment, fresher hiring, college placements, campus hiring news";
-
-  const [hiringNews, talentNews] = await Promise.all([
-    fetchNewsForTopicWithRetries(hiringTopic, NEWS_ITEMS_PER_SECTION),
-    fetchNewsForTopicWithRetries(talentTopic, NEWS_ITEMS_PER_SECTION)
-  ]);
-
-  const cappedHiringNews = fillNewsItems(hiringNews, NEWS_ITEMS_PER_SECTION);
-  const cappedTalentNews = fillNewsItems(talentNews, NEWS_ITEMS_PER_SECTION);
-  const [featuredHiringNews, featuredTalentNews] = await Promise.all([
-    attachFeaturedImage(cappedHiringNews),
-    attachFeaturedImage(cappedTalentNews)
-  ]);
-  const allItems = [...featuredHiringNews, ...featuredTalentNews];
+  const selectedSection = site.includes("talent.zigme.in") ? "talent" : "hiring";
+  const selectedTopic = defaultNewsTopicForSite(site);
+  const selectedNews = await fetchNewsForTopicWithRetries(selectedTopic, NEWS_ITEMS_PER_SECTION);
+  const featuredNews = await attachFeaturedImage(fillNewsItems(selectedNews, NEWS_ITEMS_PER_SECTION));
   const { startDate, endDate } = buildLatestNewsCacheDateRange();
 
   await LatestNewsCacheModel.findOneAndUpdate(
     { cache_key: cacheKey },
     {
       cache_key: cacheKey,
-      topic,
+      topic: site,
       start_date: startDate,
       end_date: endDate,
-      hiring_items: featuredHiringNews,
-      talent_items: featuredTalentNews,
-      items: allItems,
+      hiring_items: selectedSection === "hiring" ? featuredNews : [],
+      talent_items: selectedSection === "talent" ? featuredNews : [],
+      items: featuredNews,
       expires_at: new Date(Date.now() + LATEST_NEWS_CACHE_TTL_MS)
     },
     { upsert: true, new: true }
   );
 
   return {
-    hiring: featuredHiringNews,
-    talent: featuredTalentNews
+    hiring: selectedSection === "hiring" ? featuredNews : [],
+    talent: selectedSection === "talent" ? featuredNews : []
   };
 }
 
